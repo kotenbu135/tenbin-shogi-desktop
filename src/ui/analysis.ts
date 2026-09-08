@@ -296,27 +296,30 @@ export class AnalysisPanel {
         : '<div class="analysis-empty">検討を始めると、候補手と勝率がここに並びます。</div>';
       return;
     }
-    const tbl = document.createElement('table');
-    tbl.innerHTML = `<thead><tr><th class="rank">順位</th><th>候補</th><th>先手勝率</th><th class="cp">評価値</th><th>読み筋</th></tr></thead>`;
-    const body = document.createElement('tbody');
+    // 候補ごとに2行。1行目に順位・候補手・先手勝率・評価値、2行目に読み筋。
+    // 右列は幅が狭いので、表の列に分けると読み筋が縦に潰れる。
+    const list = document.createElement('ol');
+    list.className = 'cand-list';
     for (const l of lines) {
-      const tr = document.createElement('tr');
+      const li = document.createElement('li');
+      li.className = 'cand';
       const pv = this.deps.pvText(l.pv);
       const move = pv[0] ?? '—';
       const evalText = l.mate !== null
         ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
         : l.cp !== null ? (l.cp > 0 ? `+${l.cp}` : String(l.cp)) : '';
       const pct = (l.pSente * 100).toFixed(1);
-      tr.innerHTML = `
-        <td class="rank">${l.multipv}</td>
-        <td class="move">${escapeHtml(move)}</td>
-        <td class="p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></td>
-        <td class="cp">${escapeHtml(evalText)}</td>
-        <td class="pv">${escapeHtml(pv.slice(1, 14).join(' '))}</td>`;
-      body.appendChild(tr);
+      li.innerHTML = `
+        <div class="cand-head">
+          <span class="rank">${l.multipv}</span>
+          <span class="move">${escapeHtml(move)}</span>
+          <span class="p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></span>
+          <span class="cp" title="手番側の評価値">${escapeHtml(evalText)}</span>
+        </div>
+        <div class="pv">${escapeHtml(pv.slice(1, 16).join(' '))}</div>`;
+      list.appendChild(li);
     }
-    tbl.appendChild(body);
-    this.table.replaceChildren(tbl);
+    this.table.replaceChildren(list);
   }
 }
 

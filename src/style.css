@@ -368,14 +368,15 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .analysis-notice .link { margin-left: 4px; }
 .analysis-table { overflow: auto; }
 .analysis-empty { padding: 12px; color: var(--ink-2); }
-.analysis-table table { width: 100%; border-collapse: collapse; }
-.analysis-table th { font-weight: 500; font-size: 12px; color: var(--ink-3); text-align: left; padding: 4px 8px; position: sticky; top: 0; background: var(--panel); }
-.analysis-table td { padding: 6px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
-.analysis-table .rank { width: 2.4em; text-align: right; color: var(--ink-3); }
-.analysis-table td.move { white-space: nowrap; font-family: var(--font-serif); font-size: 15px; }
-.analysis-table td.p { white-space: nowrap; }
-.analysis-table td.cp { text-align: right; color: var(--ink-2); white-space: nowrap; }
-.analysis-table td.pv { color: var(--ink-2); font-size: 12px; font-family: var(--font-serif); line-height: 1.6; user-select: text; -webkit-user-select: text; }
+.cand-list { list-style: none; margin: 0; padding: 0; }
+.cand { padding: 6px 12px 7px; border-top: 1px solid var(--rule); }
+.cand-head { display: grid; grid-template-columns: 1.4em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.cand .rank { color: var(--ink-3); font-size: 12px; text-align: right; }
+.cand .move { font-family: var(--font-serif); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cand .p { white-space: nowrap; }
+.cand .num { display: inline-block; min-width: 3.6em; text-align: right; }
+.cand .cp { color: var(--ink-2); white-space: nowrap; min-width: 3.2em; text-align: right; font-size: 12px; }
+.cand .pv { margin-top: 2px; padding-left: calc(1.4em + 8px); color: var(--ink-2); font-size: 12px; font-family: var(--font-serif); line-height: 1.6; user-select: text; -webkit-user-select: text; }
 .bar { display: inline-block; width: 56px; height: 8px; vertical-align: middle; margin-right: 6px; border: 1px solid var(--gote); background: transparent; }
 .bar i { display: block; height: 100%; width: var(--p); background: var(--sente); }
 

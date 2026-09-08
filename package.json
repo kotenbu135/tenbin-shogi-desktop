@@ -21,7 +21,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
+    "puppeteer-core": "^25.10.0",
     "typescript": "^5.9.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "ws": "^8.21.3"
   }
 }

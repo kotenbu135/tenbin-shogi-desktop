@@ -49,6 +49,17 @@ npm run tauri dev        # アプリとして起動
 npm run tauri build      # 配布物
 ```
 
+### 動作の確かめ方（自動）
+
+```bash
+npm run build && npm run preview          # http://localhost:4173
+node scripts/smoke-preview.mjs /tmp       # ブラウザで両玉→布石→本将棋→待ったを通す
+WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 npm run tauri dev   # 別の端末で
+node scripts/drive-app.mjs /tmp           # 動いているアプリを操作し、登録済みエンジンで検討まで通す
+```
+
+`drive-app.mjs` は Linux（WebKitGTK）向け。Windows の WebView2 では動かない。
+
 ### WSL / Ubuntu で `tauri dev` するには
 
 ```bash
