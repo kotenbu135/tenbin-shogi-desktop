@@ -187,7 +187,8 @@ export function parseKif(text: string): ParsedKif {
       continue;
     }
     if (line.startsWith('*') || line.startsWith('#') || line.startsWith('まで')) continue;
-    const m = /^(\d+)\s+(\S+)(?:\s+(\(.*\)))?/.exec(line);
+    // normalizedKifLines が「同　銀」の全角空白を半角にするので、「同」の後ろの空白は手の一部として読む
+    const m = /^(\d+)\s+(同\s*\S+|\S+)(?:\s+(\(.*\)))?/.exec(line);
     if (!m) continue;
     const mv = m[2]!;
     const time = parseTime(m[3]);
