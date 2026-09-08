@@ -1,20 +1,33 @@
-// 盤・駒台・名札の描画と、クリックによる入力。
+// 盤・駒台・名札・時計の描画と、クリックによる入力。
 // ルールは持たない。合法な行き先は Game から関数で受け取り、光らせるだけ。
 //
 // 慣習（日本将棋連盟の盤面図、ShogiHome・将棋所と同じ）:
-//   - 先手が手前（下）。筋は上に 9〜1 の算用数字、段は右に 一〜九 の漢数字
-//   - 後手の駒台は左上、先手の駒台は右下。駒台の駒は 玉 飛 角 金 銀 桂 香 歩 の順
+//   - 先手が手前（下）。筋は上に 9〜1 の算用数字、段は右に 一〜九 の漢数字。反転すると逆順
+//   - 後手の駒台は左上、先手の駒台は右下（反転すると入れ替わる）。駒台の駒は 玉 飛 角 金 銀 桂 香 歩 の順
 //   - マスは実物の盤と同じく縦長（1尺2寸 × 1尺1寸 ≒ 1.09）
 //   - 駒の画像は公開版サイトと同じ lishogi の kanji_light（Ka-hu, CC BY 4.0）。
-//     後手の駒は回転済みの別ファイル（1*.svg）で、CSS では回さない
+//     後手の駒は回転済みの別ファイル（1*.svg）で、CSS では回さない。反転時は色と絵の対応を入れ替える
 
 import type { BoardSnapshot, Color, Phase, Piece } from '../state/game.ts';
 import { colorMark, colorName } from '../state/game.ts';
+import type { ClockView } from '../state/clock.ts';
 import type { Role as OpsRole } from 'shogiops/types';
+
+export type Orientation = 'sente' | 'gote';
 
 export interface BoardCallbacks {
   onDrop(role: OpsRole, square: string): void;
   onMove(from: string, to: string): void;
+  /** 局面編集中のクリック */
+  onEditSquare?(square: string): void;
+  onEditHand?(color: Color, role: OpsRole): void;
+}
+
+/** 検討の候補などを盤に描く形。from が無ければ駒打ち（行き先に輪） */
+export interface Shape {
+  from?: string;
+  to: string;
+  rank: number;
 }
 
 export interface RenderOptions {
@@ -22,10 +35,12 @@ export interface RenderOptions {
   phase: Phase;
   dropSquares(role: OpsRole): Set<string>;
   moveDests(from: string): Set<string>;
-  /** マスに載せる印（検討の候補順位など）。square → 短い文字 */
-  marks?: Map<string, string>;
+  shapes?: Shape[];
   /** 名札の名前。省略時は 先手／後手 */
-  names?: Record<Color, string>;
+  names?: Partial<Record<Color, string>>;
+  clocks?: Record<Color, ClockView | null>;
+  /** 局面編集。すべてのマスと駒台を押せる。selected は手に持っている駒の元のマス */
+  edit?: { selected?: string | null };
 }
 
 type Selection = { kind: 'hand'; color: Color; role: OpsRole } | { kind: 'square'; square: string } | null;
@@ -33,58 +48,114 @@ type Selection = { kind: 'hand'; color: Color; role: OpsRole } | { kind: 'square
 const FILES = ['9', '8', '7', '6', '5', '4', '3', '2', '1'];
 const RANKS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
 const RANK_KANJI = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-/** 駒台の並び（先手から見て左上→右下）。後手は逆順にして、後手から見て同じ並びにする */
+/** 駒台の並び（手前の対局者から見て左上→右下）。奥の対局者は逆順にして、その人から見て同じ並びにする */
 const STAND_ORDER: OpsRole[] = ['king', 'rook', 'bishop', 'gold', 'silver', 'knight', 'lance', 'pawn'];
 const STAND_ORDER_NO_KING: OpsRole[] = ['rook', 'bishop', 'gold', 'silver', 'knight', 'lance', 'pawn'];
 
-/** kanji_light のファイル名。0 が先手、1 が後手（回転済み） */
+/** kanji_light のファイル名。0 が手前向き、1 が奥向き（回転済み） */
 const PIECE_CODE: Record<string, string> = {
   pawn: 'FU', lance: 'KY', knight: 'KE', silver: 'GI', gold: 'KI', bishop: 'KA', rook: 'HI',
   tokin: 'TO', promotedlance: 'NY', promotedknight: 'NK', promotedsilver: 'NG', horse: 'UM', dragon: 'RY',
 };
 
-export function pieceCode(p: Piece): string {
-  // 玉将は下位者（先手）、王将は上位者（後手）が持つ慣習
-  if (p.role === 'king') return p.color === 'sente' ? '0GY' : '1OU';
-  return `${p.color === 'sente' ? 0 : 1}${PIECE_CODE[p.role] ?? 'FU'}`;
+export function pieceCode(p: Piece, orientation: Orientation = 'sente'): string {
+  // 玉将は先手、王将は後手（上位者が王将を持つ慣習）。向きは盤の向きで決まる
+  const facingViewer = p.color === orientation;
+  const prefix = facingViewer ? '0' : '1';
+  if (p.role === 'king') return `${prefix}${p.color === 'sente' ? 'GY' : 'OU'}`;
+  return `${prefix}${PIECE_CODE[p.role] ?? 'FU'}`;
 }
+
+// 盤の描画座標（SVG の矢印用）。マス幅 100、高さ 109
+const SQ_W = 100;
+const SQ_H = 109;
 
 export class Board {
   private selection: Selection = null;
   private snapshot: BoardSnapshot | null = null;
   private options: RenderOptions | null = null;
+  private orientation: Orientation = 'sente';
   private readonly cells = new Map<string, HTMLButtonElement>();
-  private readonly stands: Record<Color, HTMLElement>;
-  private readonly plates: Record<Color, HTMLElement>;
+  private readonly standFar: HTMLElement;
+  private readonly standNear: HTMLElement;
+  private readonly plateFar: HTMLElement;
+  private readonly plateNear: HTMLElement;
   private readonly grid: HTMLElement;
+  private readonly shapesEl: SVGSVGElement;
+  private readonly filesEl: HTMLElement;
+  private readonly ranksEl: HTMLElement;
 
   constructor(private readonly root: HTMLElement, private readonly cb: BoardCallbacks) {
     root.classList.add('shogi');
     root.innerHTML = `
-      <div class="stand gote" data-color="gote">
+      <div class="stand far">
         <div class="stand-pieces"></div>
         <div class="plate"></div>
       </div>
       <div class="board-wrap">
-        <div class="files">${FILES.map((f) => `<span>${f}</span>`).join('')}</div>
-        <div class="board"><div class="grid" role="grid" aria-label="将棋盤"></div></div>
-        <div class="ranks">${RANK_KANJI.map((r) => `<span>${r}</span>`).join('')}</div>
+        <div class="files"></div>
+        <div class="board"><div class="grid" role="grid" aria-label="将棋盤"></div><svg class="shapes" viewBox="0 0 ${SQ_W * 9} ${SQ_H * 9}" aria-hidden="true"></svg></div>
+        <div class="ranks"></div>
       </div>
-      <div class="stand sente" data-color="sente">
+      <div class="stand near">
         <div class="plate"></div>
         <div class="stand-pieces"></div>
       </div>`;
     this.grid = root.querySelector('.grid')!;
-    this.stands = {
-      gote: root.querySelector('.stand.gote .stand-pieces')!,
-      sente: root.querySelector('.stand.sente .stand-pieces')!,
+    this.shapesEl = root.querySelector('svg.shapes')!;
+    this.filesEl = root.querySelector('.files')!;
+    this.ranksEl = root.querySelector('.ranks')!;
+    this.standFar = root.querySelector('.stand.far .stand-pieces')!;
+    this.standNear = root.querySelector('.stand.near .stand-pieces')!;
+    this.plateFar = root.querySelector('.stand.far .plate')!;
+    this.plateNear = root.querySelector('.stand.near .plate')!;
+    this.buildGrid();
+    for (const el of [this.standFar, this.standNear]) {
+      el.addEventListener('click', (e) => {
+        const t = (e.target as HTMLElement).closest<HTMLElement>('.slot');
+        if (!t || !t.dataset.role) return;
+        this.clickHand(el.dataset.color as Color, t.dataset.role as OpsRole);
+      });
+    }
+    // マスの幅 --sq を、使える高さと幅の小さい方から決める。
+    // 幅: 駒台(2.3) + 隙間(0.35) + 盤(9) + 段の帯(0.55) + 隙間(0.35) + 駒台(2.3) ≒ 14.85
+    // 高さ: 筋の帯(0.5) + 盤(9 × 1.09) ≒ 10.35（+ 名札と時計のぶん 0.6）
+    const fit = () => {
+      const r = root.getBoundingClientRect();
+      const sq = Math.floor(Math.min((r.width - 24) / 14.85, (r.height - 24) / 10.95));
+      root.style.setProperty('--sq', `${Math.max(24, sq)}px`);
     };
-    this.plates = {
-      gote: root.querySelector('.stand.gote .plate')!,
-      sente: root.querySelector('.stand.sente .plate')!,
-    };
-    for (const r of RANKS) {
-      for (const f of FILES) {
+    new ResizeObserver(fit).observe(root);
+    fit();
+  }
+
+  get currentOrientation(): Orientation {
+    return this.orientation;
+  }
+
+  /** 盤の向き。後手向きにすると筋・段・駒台・駒の向きがすべて入れ替わる */
+  setOrientation(o: Orientation): void {
+    if (o === this.orientation) return;
+    this.orientation = o;
+    this.buildGrid();
+    this.paint();
+  }
+
+  private displayFiles(): string[] {
+    return this.orientation === 'sente' ? FILES : [...FILES].reverse();
+  }
+
+  private displayRanks(): string[] {
+    return this.orientation === 'sente' ? RANKS : [...RANKS].reverse();
+  }
+
+  private buildGrid(): void {
+    this.grid.replaceChildren();
+    this.cells.clear();
+    const files = this.displayFiles();
+    const ranks = this.displayRanks();
+    for (const r of ranks) {
+      for (const f of files) {
         const sq = f + r;
         const b = document.createElement('button');
         b.className = 'cell';
@@ -96,23 +167,17 @@ export class Board {
         this.cells.set(sq, b);
       }
     }
-    for (const c of ['sente', 'gote'] as const) {
-      this.stands[c].addEventListener('click', (e) => {
-        const t = (e.target as HTMLElement).closest<HTMLElement>('.slot');
-        if (!t || !t.dataset.role) return;
-        this.clickHand(c, t.dataset.role as OpsRole);
-      });
-    }
-    // マスの幅 --sq を、使える高さと幅の小さい方から決める。
-    // 幅: 駒台(2.3) + 隙間(0.35) + 盤(9) + 段の帯(0.55) + 隙間(0.35) + 駒台(2.3) ≒ 14.85
-    // 高さ: 筋の帯(0.5) + 盤(9 × 1.09) ≒ 10.35（+ 名札のぶん 0.6）
-    const fit = () => {
-      const r = root.getBoundingClientRect();
-      const sq = Math.floor(Math.min((r.width - 24) / 14.85, (r.height - 24) / 10.95));
-      root.style.setProperty('--sq', `${Math.max(24, sq)}px`);
-    };
-    new ResizeObserver(fit).observe(root);
-    fit();
+    this.filesEl.innerHTML = files.map((f) => `<span>${f}</span>`).join('');
+    this.ranksEl.innerHTML = ranks.map((r) => `<span>${RANK_KANJI[r.charCodeAt(0) - 97]}</span>`).join('');
+    this.standFar.dataset.color = this.orientation === 'sente' ? 'gote' : 'sente';
+    this.standNear.dataset.color = this.orientation;
+  }
+
+  /** マスの表示上の位置（列, 行）。矢印の座標に使う */
+  private displayPos(sq: string): { col: number; row: number } {
+    const col = this.displayFiles().indexOf(sq[0]!);
+    const row = this.displayRanks().indexOf(sq[1]!);
+    return { col, row };
   }
 
   clearSelection(): void {
@@ -125,7 +190,16 @@ export class Board {
     this.options = options;
     if (this.selection?.kind === 'square' && !snapshot.pieces.has(this.selection.square)) this.selection = null;
     if (this.selection?.kind === 'hand' && !(snapshot.hands[this.selection.color].get(this.selection.role) ?? 0)) this.selection = null;
+    if (options.edit) this.selection = null;
     this.paint();
+  }
+
+  /** 時計だけを描き直す（毎秒呼ばれるので、盤全体は触らない） */
+  updateClocks(clocks: Record<Color, ClockView | null>): void {
+    if (!this.options) return;
+    this.options.clocks = clocks;
+    this.paintPlate('sente');
+    this.paintPlate('gote');
   }
 
   private paint(): void {
@@ -133,42 +207,48 @@ export class Board {
     const o = this.options;
     if (!s || !o) return;
     const dests = this.destsForSelection();
-    const zone = o.phase === 'kings' || o.phase === 'fuseki' ? s.turn : null;
+    const zone = !o.edit && (o.phase === 'kings' || o.phase === 'fuseki') ? s.turn : null;
     this.root.classList.toggle('phase-normal', o.phase === 'normal' || o.phase === 'over');
+    this.root.classList.toggle('editing', !!o.edit);
     for (const [sq, cell] of this.cells) {
       const p = s.pieces.get(sq);
       cell.replaceChildren();
-      if (p) cell.appendChild(pieceEl(p));
-      const mark = o.marks?.get(sq);
-      if (mark) {
-        const m = document.createElement('span');
-        m.className = 'mark';
-        m.textContent = mark;
-        cell.appendChild(m);
-      }
+      if (p) cell.appendChild(pieceEl(p, this.orientation));
       const rank = sq.charCodeAt(1) - 96; // a=1
       cell.classList.toggle('zone', zone === 'sente' ? rank >= 6 : zone === 'gote' ? rank <= 4 : false);
-      cell.classList.toggle('last', s.lastSquare === sq);
-      cell.classList.toggle('last-from', s.lastFrom === sq);
-      cell.classList.toggle('check', s.checkSquare === sq);
-      cell.classList.toggle('selected', this.selection?.kind === 'square' && this.selection.square === sq);
+      cell.classList.toggle('last', !o.edit && s.lastSquare === sq);
+      cell.classList.toggle('last-from', !o.edit && s.lastFrom === sq);
+      cell.classList.toggle('check', !o.edit && s.checkSquare === sq);
+      cell.classList.toggle('selected', (this.selection?.kind === 'square' && this.selection.square === sq) || o.edit?.selected === sq);
       cell.classList.toggle('dest', dests.has(sq));
       cell.classList.toggle('oc', dests.has(sq) && !!p);
-      cell.disabled = !o.interactive;
+      cell.disabled = !o.interactive && !o.edit;
     }
     this.paintStand('gote');
     this.paintStand('sente');
+    this.paintPlate('gote');
+    this.paintPlate('sente');
+    this.paintShapes(o.shapes ?? []);
+  }
+
+  private standFor(color: Color): HTMLElement {
+    return color === this.orientation ? this.standNear : this.standFar;
+  }
+
+  private plateFor(color: Color): HTMLElement {
+    return color === this.orientation ? this.plateNear : this.plateFar;
   }
 
   private paintStand(color: Color): void {
     const s = this.snapshot!;
     const o = this.options!;
-    const el = this.stands[color];
+    const el = this.standFor(color);
     el.replaceChildren();
     const hand = s.hands[color];
-    const withKing = o.phase !== 'normal' && o.phase !== 'over';
+    const withKing = !o.edit && o.phase !== 'normal' && o.phase !== 'over';
     const base = withKing ? STAND_ORDER : STAND_ORDER_NO_KING;
-    const order = color === 'sente' ? base : [...base].reverse();
+    const near = color === this.orientation;
+    const order = near ? base : [...base].reverse();
     const toMove = s.turn === color;
     for (const role of order) {
       const n = hand.get(role) ?? 0;
@@ -177,11 +257,11 @@ export class Board {
       slot.className = 'slot';
       slot.dataset.role = role;
       slot.dataset.n = String(n);
-      slot.disabled = !o.interactive || !toMove || n === 0;
+      slot.disabled = o.edit ? false : !o.interactive || !toMove || n === 0;
       slot.classList.toggle('selected', this.selection?.kind === 'hand' && this.selection.color === color && this.selection.role === role);
       slot.classList.toggle('dim', n === 0);
-      if (o.phase === 'kings') slot.classList.toggle('faded', role !== 'king');
-      slot.appendChild(pieceEl({ color, role }));
+      if (o.phase === 'kings' && !o.edit) slot.classList.toggle('faded', role !== 'king');
+      slot.appendChild(pieceEl({ color, role }, this.orientation));
       if (n >= 2) {
         const c = document.createElement('span');
         c.className = 'count';
@@ -192,8 +272,14 @@ export class Board {
       el.appendChild(slot);
     }
     el.classList.toggle('with-king', withKing);
-    const plate = this.plates[color];
-    const name = o.names?.[color] ?? colorName(color);
+  }
+
+  private paintPlate(color: Color): void {
+    const s = this.snapshot;
+    const o = this.options;
+    if (!s || !o) return;
+    const plate = this.plateFor(color);
+    const name = o.names?.[color] || colorName(color);
     plate.replaceChildren();
     const mark = document.createElement('span');
     mark.className = 'plate-mark';
@@ -202,7 +288,7 @@ export class Board {
     label.className = 'plate-name';
     label.textContent = name;
     plate.append(mark, label);
-    const active = toMove && o.phase !== 'over' && o.phase !== 'choose';
+    const active = !o.edit && s.turn === color && o.phase !== 'over' && o.phase !== 'choose';
     plate.classList.toggle('to-move', active);
     if (active) {
       const t = document.createElement('span');
@@ -210,18 +296,74 @@ export class Board {
       t.textContent = '手番';
       plate.appendChild(t);
     }
+    const ck = o.clocks?.[color];
+    if (ck) {
+      const c = document.createElement('span');
+      c.className = 'plate-clock' + (ck.running ? ' running' : '') + (ck.inByoyomi ? ' byoyomi' : '');
+      c.textContent = ck.inByoyomi && ck.byoyomi !== null ? `秒読み ${ck.byoyomi}` : ck.main;
+      plate.appendChild(c);
+    }
+  }
+
+  private paintShapes(shapes: Shape[]): void {
+    const parts: string[] = [];
+    const center = (sq: string) => {
+      const { col, row } = this.displayPos(sq);
+      return { x: (col + 0.5) * SQ_W, y: (row + 0.5) * SQ_H };
+    };
+    // 順位の低い方から描き、1位を最後に（上に）重ねる
+    for (const sh of [...shapes].sort((a, b) => b.rank - a.rank)) {
+      const r = Math.min(sh.rank, 3);
+      const to = center(sh.to);
+      if (sh.from) {
+        const from = center(sh.from);
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const head = 26;
+        const tipX = to.x - ux * 30;
+        const tipY = to.y - uy * 30;
+        const baseX = tipX - ux * head;
+        const baseY = tipY - uy * head;
+        const px = -uy;
+        const py = ux;
+        parts.push(
+          `<g class="shape r${r}">` +
+            `<line x1="${from.x + ux * 22}" y1="${from.y + uy * 22}" x2="${baseX}" y2="${baseY}" />` +
+            `<polygon points="${tipX},${tipY} ${baseX + px * 15},${baseY + py * 15} ${baseX - px * 15},${baseY - py * 15}" />` +
+            badge(to.x + 36, to.y - 40, sh.rank) +
+            '</g>',
+        );
+      } else {
+        parts.push(
+          `<g class="shape r${r}">` +
+            `<ellipse class="ring" cx="${to.x}" cy="${to.y}" rx="38" ry="42" />` +
+            badge(to.x + 36, to.y - 40, sh.rank) +
+            '</g>',
+        );
+      }
+    }
+    this.shapesEl.innerHTML = parts.join('');
   }
 
   private destsForSelection(): Set<string> {
     const sel = this.selection;
     const o = this.options;
-    if (!sel || !o) return new Set();
+    if (!sel || !o || o.edit) return new Set();
     return sel.kind === 'hand' ? o.dropSquares(sel.role) : o.moveDests(sel.square);
   }
 
   private clickHand(color: Color, role: OpsRole): void {
     const s = this.snapshot;
-    if (!s || !this.options?.interactive || s.turn !== color) return;
+    const o = this.options;
+    if (!s || !o) return;
+    if (o.edit) {
+      this.cb.onEditHand?.(color, role);
+      return;
+    }
+    if (!o.interactive || s.turn !== color) return;
     const sel = this.selection;
     this.selection = sel?.kind === 'hand' && sel.role === role && sel.color === color ? null : { kind: 'hand', color, role };
     this.paint();
@@ -229,7 +371,13 @@ export class Board {
 
   private clickSquare(sq: string): void {
     const s = this.snapshot;
-    if (!s || !this.options?.interactive) return;
+    const o = this.options;
+    if (!s || !o) return;
+    if (o.edit) {
+      this.cb.onEditSquare?.(sq);
+      return;
+    }
+    if (!o.interactive) return;
     const sel = this.selection;
     const dests = this.destsForSelection();
     if (sel && dests.has(sq)) {
@@ -248,9 +396,13 @@ export class Board {
   }
 }
 
-function pieceEl(p: Piece): HTMLElement {
+function badge(x: number, y: number, rank: number): string {
+  return `<circle class="badge" cx="${x}" cy="${y}" r="15" /><text class="badge-text" x="${x}" y="${y + 6}" text-anchor="middle">${rank}</text>`;
+}
+
+export function pieceEl(p: Piece, orientation: Orientation = 'sente'): HTMLElement {
   const d = document.createElement('div');
   d.className = `piece ${p.color} ${p.role}`;
-  d.dataset.code = pieceCode(p);
+  d.dataset.code = pieceCode(p, orientation);
   return d;
 }

@@ -1,5 +1,6 @@
 // 棋譜の一覧と、局面の移動（最初へ・1手戻る・1手進む・最後へ）。
 // 行を押すとその局面を表示する。cursor が null なら最新の局面。
+// 消費時間があれば「この手 / 累計」を右に出す（ShogiHome と同じ見せ方）。
 
 import type { MoveRecord, Phase } from '../state/game.ts';
 import { colorMark } from '../state/game.ts';
@@ -17,10 +18,22 @@ export interface KifuDeps {
   onSeek(cursor: number | null): void;
 }
 
+function mmss(sec: number): string {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+function hhmmss(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${h}:${String(m).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+}
+
 export class KifuList {
   private readonly list: HTMLElement;
   private readonly nav: HTMLElement;
   private readonly foot: HTMLElement;
+  private moves: MoveRecord[] = [];
+  private cursor: number | null = null;
 
   constructor(private readonly root: HTMLElement, private readonly deps: KifuDeps) {
     root.innerHTML = `
@@ -45,9 +58,6 @@ export class KifuList {
     });
   }
 
-  private moves: MoveRecord[] = [];
-  private cursor: number | null = null;
-
   seek(dir: 'first' | 'prev' | 'next' | 'last'): void {
     const n = this.moves.length;
     const cur = this.cursor ?? n;
@@ -66,6 +76,8 @@ export class KifuList {
     this.cursor = cursor;
     const n = moves.length;
     const cur = cursor ?? n;
+    const withTime = moves.some((m) => m.time);
+    this.list.classList.toggle('with-time', withTime);
     const frag = document.createDocumentFragment();
     const start = document.createElement('li');
     start.className = 'kifu-move start' + (cur === 0 ? ' current' : '');
@@ -98,6 +110,12 @@ export class KifuList {
         t.textContent = m.text;
       }
       li.append(num, t);
+      if (withTime) {
+        const tm = document.createElement('span');
+        tm.className = 'tm';
+        tm.textContent = m.time ? `${mmss(m.time.elapsed)} / ${hhmmss(m.time.total)}` : '';
+        li.appendChild(tm);
+      }
       li.addEventListener('click', () => this.deps.onSeek(m.index + 1 >= n ? null : m.index + 1));
       frag.appendChild(li);
     }

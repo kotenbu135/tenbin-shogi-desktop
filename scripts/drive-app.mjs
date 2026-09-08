@@ -23,13 +23,14 @@ const ev = async (expr) => { const r = await call('Runtime.evaluate', { expressi
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const shot = async (name) => { try { const r = await call('Page.snapshotRect', { x: 0, y: 0, width: 1360, height: 860, coordinateSystem: 'Viewport' }); fs.writeFileSync(name, Buffer.from(r.dataURL.split(',')[1], 'base64')); console.log('shot', name); } catch (e) { console.log('snapshot failed:', e.message.slice(0, 200)); } };
 
+await ev('window.tenbin.start("tenbin"); 0');
 console.log('tauri?', await ev('"__TAURI_INTERNALS__" in window'), '|', await ev('document.getElementById("status").textContent'));
 console.log('engine select:', await ev('[...document.querySelectorAll(".engine-select option")].map(o=>o.textContent).join(",")'));
 await shot(`${OUT}/app-start.png`);
 // 両玉→選択→布石38手
 const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'missing '+${JSON.stringify(sel)}; e.click(); return 'ok'})()`);
-console.log(await step('.stand.sente .slot[data-role="king"]'), await step('.cell[data-sq="5i"]'));
-console.log(await step('.stand.gote .slot[data-role="king"]'), await step('.cell[data-sq="5a"]'));
+console.log(await step('.stand-pieces[data-color="sente"] .slot[data-role="king"]'), await step('.cell[data-sq="5i"]'));
+console.log(await step('.stand-pieces[data-color="gote"] .slot[data-role="king"]'), await step('.cell[data-sq="5a"]'));
 console.log(await ev('(()=>{const b=[...document.querySelectorAll(".choose button")][0]; b.click(); return "chose"})()'));
 // 布石中（3手目）の検討: 布石対応エンジンなら候補が並ぶ
 console.log('fuseki analysis:', await step('[data-act="toggle"]'));
@@ -42,7 +43,7 @@ await shot(`${OUT}/app-fuseki-analysis.png`);
 console.log('stop:', await step('[data-act="toggle"]'));
 await sleep(500);
 for (let i = 0; i < 38; i++) {
-  const r = await ev(`(()=>{const t=document.getElementById("status").textContent.includes("先手")?"sente":"gote"; const h=document.querySelector(".stand."+t+" .slot:not(:disabled)"); if(!h) return "no hand"; h.click(); const d=document.querySelector(".cell.dest"); if(!d) return "no dest"; d.click(); return "ok"})()`);
+  const r = await ev(`(()=>{const t=document.getElementById("status").textContent.includes("先手")?"sente":"gote"; const h=document.querySelector(".stand-pieces[data-color='"+t+"'] .slot:not(:disabled)"); if(!h) return "no hand"; h.click(); const d=document.querySelector(".cell.dest"); if(!d) return "no dest"; d.click(); return "ok"})()`);
   if (r !== 'ok') { console.log('step', i, r); break; }
 }
 console.log('status:', await ev('document.getElementById("status").textContent'));
@@ -59,4 +60,21 @@ await shot(`${OUT}/app-analysis.png`);
 console.log(await step('[data-act="toggle"]'));
 await sleep(800);
 console.log('log tail:', await ev('[...document.querySelectorAll(".console-body span")].slice(-4).map(s=>s.textContent.trim()).join(" || ")'));
+// KIF をファイルに書いて読み戻す（Tauri のコマンド経由。ダイアログは自動化できないので直接呼ぶ）。
+// WebKit の Runtime.evaluate は Promise を待てないので、結果を window に置いて取りに行く
+{
+  const path = `${OUT}/drive-app.kif`;
+  await ev(`window.__r = undefined; (async () => {
+    const inv = window.__TAURI_INTERNALS__.invoke;
+    const text = window.tenbin.kif();
+    await inv('write_text_file', { path: ${JSON.stringify(path)}, text });
+    const back = await inv('read_text_file', { path: ${JSON.stringify(path)} });
+    const n0 = window.tenbin.game().moves.length;
+    window.tenbin.load(back);
+    return JSON.stringify({ same: back === text, n0, n1: window.tenbin.game().moves.length, lines: text.split('\\n').length });
+  })().then((v) => { window.__r = v; }, (e) => { window.__r = 'ERR ' + e; }); 0`);
+  let r;
+  for (let t = 0; t < 40; t++) { await sleep(250); r = await ev('window.__r'); if (r !== undefined && r !== null) break; }
+  console.log('KIF file roundtrip:', r);
+}
 ws.close();

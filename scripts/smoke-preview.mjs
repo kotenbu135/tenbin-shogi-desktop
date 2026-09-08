@@ -29,12 +29,12 @@ const firstDest = async () => {
 };
 
 console.log('0:', await status());
-await click('.stand.sente .slot[data-role="king"]');
+await click('.stand-pieces[data-color="sente"] .slot[data-role="king"]');
 const nDestK = await page.$$eval('.cell.dest', (a) => a.length);
 console.log('先手玉の置ける数:', nDestK);
 await click('.cell[data-sq="5i"]');
 console.log('1:', await status());
-await click('.stand.gote .slot[data-role="king"]');
+await click('.stand-pieces[data-color="gote"] .slot[data-role="king"]');
 await click('.cell[data-sq="5a"]');
 console.log('2:', await status());
 await page.screenshot({ path: `${OUT}/shot-choose.png` });
@@ -44,7 +44,7 @@ console.log('3:', await status());
 // 布石 38 手: 手番側の駒台の先頭の駒を、最初の置ける場所へ
 for (let i = 0; i < 38; i++) {
   const turn = await page.$eval('#status', (e) => (e.textContent.includes('先手') ? 'sente' : 'gote'));
-  const hand = await page.$(`.stand.${turn} .slot:not(:disabled)`);
+  const hand = await page.$(`.stand-pieces[data-color="${turn}"] .slot:not(:disabled)`);
   if (!hand) throw new Error(`${turn} の駒台に押せる駒が無い (i=${i})`);
   await hand.click();
   const d = await firstDest();

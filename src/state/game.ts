@@ -7,6 +7,8 @@
 //   fuseki 3〜40手: 交互に置く
 //   normal 41手〜 : 本将棋。41手目の裁定（後手玉が取れるなら先手の勝ち）を通した局面から
 //
+// mode='position' は任意の局面（局面編集・KIF の局面図）から本将棋を始める。
+//
 // 符号は日本将棋連盟の表記に従う（shogiops の日本語表記を使う）。
 //   同　銀 / ５八金左 / 打は盤上の駒が同じマスへ動けるときだけ。布石中は動ける駒が無いので打は付けない。
 
@@ -17,10 +19,11 @@ import { makeJapaneseMoveOrDrop } from 'shogiops/notation/japanese';
 import type { Shogi } from 'shogiops/variant/shogi';
 import type { MoveOrDrop, Piece as OpsPiece, Role as OpsRole, Square } from 'shogiops/types';
 import { BLACK, WHITE, type Drop, type Fuseki } from '../rules/fuseki.ts';
+import type { MoveTime } from './clock.ts';
 
 export type Color = 'sente' | 'gote';
 export type Phase = 'kings' | 'choose' | 'fuseki' | 'normal' | 'over';
-export type Mode = 'tenbin' | 'fuseki';
+export type Mode = 'tenbin' | 'fuseki' | 'position';
 
 export interface Piece {
   color: Color;
@@ -33,11 +36,12 @@ export interface MoveRecord {
   /** 盤の手数。choose は null */
   ply: number | null;
   color: Color | null;
-  /** "P*7g" / "7g7f" / "choose:sente" / "resign" */
+  /** "P*7g" / "7g7f" / "choose:sente" / "resign" / "timeout" */
   usi: string;
   /** 符号 "７六歩"（先後の記号は付けない。表示側が ☗☖ を添える） */
   text: string;
   phase: Phase;
+  time?: MoveTime;
 }
 
 export interface BoardSnapshot {
@@ -68,12 +72,28 @@ export interface ViewState {
   over: GameOver | null;
 }
 
+/** 本将棋の手を、その直前の局面とともに順に辿る（KIF の書き出しなどに使う） */
+export interface NormalStep {
+  record: MoveRecord;
+  pos: Shogi;
+  md: MoveOrDrop;
+  lastDest: Square | undefined;
+}
+
 const RANK_KANJI = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const FILE_ZEN = ['１', '２', '３', '４', '５', '６', '７', '８', '９'];
 export const ROLE_KANJI: Record<string, string> = {
   pawn: '歩', lance: '香', knight: '桂', silver: '銀', gold: '金', bishop: '角', rook: '飛', king: '玉',
   tokin: 'と', promotedlance: '成香', promotedknight: '成桂', promotedsilver: '成銀', horse: '馬', dragon: '龍',
 };
+export const USI_OF_ROLE: Record<string, string> = {
+  pawn: 'P', lance: 'L', knight: 'N', silver: 'S', gold: 'G', bishop: 'B', rook: 'R', king: 'K',
+};
+export const ROLE_OF_USI: Record<string, OpsRole> = {
+  P: 'pawn', L: 'lance', N: 'knight', S: 'silver', G: 'gold', B: 'bishop', R: 'rook', K: 'king',
+};
+
+export const HIRATE_SFEN = 'lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1';
 
 export function squareText(sq: string): string {
   const f = Number(sq[0]);
@@ -92,16 +112,27 @@ export function colorName(c: Color): string {
 export class Game {
   readonly moves: MoveRecord[] = [];
   private pos: Shogi | null = null;
-  private sfen41: string | null = null;
+  /** 本将棋の開始局面（41手目、または任意局面）の SFEN */
+  private startSfen: string | null = null;
   private normalMoves: string[] = [];
   private readonly fusekiBoard = new Map<string, Piece>();
   private lastSquare: string | null = null;
   private lastFrom: string | null = null;
   private chosen: Color | null = null;
+  /** 本将棋の手数の土台。布石からなら 40、任意局面からなら 0 */
+  private readonly basePly: number;
   over: GameOver | null = null;
 
-  constructor(private readonly fuseki: Fuseki, readonly mode: Mode) {
+  constructor(private readonly fuseki: Fuseki, readonly mode: Mode, startSfen?: string) {
     fuseki.reset();
+    this.basePly = mode === 'position' ? 0 : 40;
+    if (mode === 'position') {
+      const sfen = startSfen ?? HIRATE_SFEN;
+      const r = parseSfen('standard', sfen, false);
+      if (r.isErr) throw new Error(`局面を読めない: ${r.error.message}`);
+      this.pos = r.value;
+      this.startSfen = sfen;
+    }
   }
 
   get phase(): Phase {
@@ -126,8 +157,20 @@ export class Game {
 
   /** 次に指す手が何手目か（1 始まり） */
   get nextPly(): number {
-    if (this.pos) return 40 + this.normalMoves.length + 1;
+    if (this.pos) return this.basePly + this.normalMoves.length + 1;
     return this.fuseki.ply + 1;
+  }
+
+  /** 本将棋の開始局面の SFEN（まだ本将棋でなければ null） */
+  get normalStartSfen(): string | null {
+    return this.startSfen;
+  }
+
+  /** 本将棋の開始局面（shogiops）。KIF の局面図などに使う */
+  startPosition(): Shogi | null {
+    if (!this.startSfen) return null;
+    const r = parseSfen('standard', this.startSfen, false);
+    return r.isOk ? r.value : null;
   }
 
   /** 布石フェーズの合法な駒打ち。kings フェーズでは玉だけに絞る。 */
@@ -172,12 +215,15 @@ export class Game {
   }
 
   /** 棋譜のトークンを1つ適用する。人間の入力・エンジンの手・棋譜の再生はすべてここを通る。 */
-  apply(token: string): MoveRecord {
+  apply(token: string, time?: MoveTime): MoveRecord {
     if (this.over) throw new Error('対局は終わっている');
-    if (token.startsWith('choose:')) return this.applyChoose(token);
-    if (token === 'resign') return this.applyResign();
-    if (this.pos) return this.applyNormal(token);
-    return this.applyDrop(token);
+    let rec: MoveRecord;
+    if (token.startsWith('choose:')) rec = this.applyChoose(token);
+    else if (token === 'resign' || token === 'timeout') rec = this.applyEnd(token);
+    else if (this.pos) rec = this.applyNormal(token);
+    else rec = this.applyDrop(token);
+    if (time) rec.time = time;
+    return rec;
   }
 
   private push(rec: Omit<MoveRecord, 'index'>): MoveRecord {
@@ -194,11 +240,12 @@ export class Game {
     return this.push({ ply: null, color: null, usi: token, text: c === 'sente' ? '先手を持つ' : '後手を持つ', phase: 'choose' });
   }
 
-  private applyResign(): MoveRecord {
+  private applyEnd(token: 'resign' | 'timeout'): MoveRecord {
     const loser = this.turn;
     const phase = this.phase;
-    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason: `${colorName(loser)}の投了` };
-    return this.push({ ply: this.nextPly, color: loser, usi: 'resign', text: '投了', phase });
+    const reason = token === 'resign' ? `${colorName(loser)}の投了` : `${colorName(loser)}の時間切れ`;
+    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason };
+    return this.push({ ply: this.nextPly, color: loser, usi: token, text: token === 'resign' ? '投了' : '切れ負け', phase });
   }
 
   private applyDrop(token: string): MoveRecord {
@@ -220,7 +267,7 @@ export class Game {
 
   private enterNormal(): void {
     const sfen = this.fuseki.toSfen();
-    this.sfen41 = sfen;
+    this.startSfen = sfen;
     if (!this.fuseki.verifyFinalSfen(sfen)) {
       // 41手目の裁定: 手番（先手）が後手玉を取れる。エンジンには渡せない局面なのでここで終わる。
       this.over = { winner: 'sente', reason: '41手目の裁定（後手玉が先手の利きに当たっている）' };
@@ -269,7 +316,7 @@ export class Game {
     let turn = this.turn;
     for (const u of usis) {
       if (u.length < 4 || u[1] !== '*') break;
-      const role = { P: 'pawn', L: 'lance', N: 'knight', S: 'silver', G: 'gold', B: 'bishop', R: 'rook', K: 'king' }[u[0]!];
+      const role = ROLE_OF_USI[u[0]!];
       if (!role) break;
       out.push(`${colorMark(turn)}${squareText(u.slice(2, 4))}${ROLE_KANJI[role]}`);
       turn = turn === 'sente' ? 'gote' : 'sente';
@@ -281,12 +328,32 @@ export class Game {
     return this.moves.map((m) => m.usi);
   }
 
+  times(): (MoveTime | undefined)[] {
+    return this.moves.map((m) => m.time);
+  }
+
+  /** 本将棋の手を、直前の局面つきで順に返す。 */
+  *normalSteps(): Generator<NormalStep> {
+    const start = this.startPosition();
+    if (!start) return;
+    const p = start.clone();
+    let last: Square | undefined;
+    for (const rec of this.moves) {
+      if (rec.phase !== 'normal' || rec.usi === 'resign' || rec.usi === 'timeout') continue;
+      const md = parseUsi(rec.usi);
+      if (!md) break;
+      yield { record: rec, pos: p.clone(), md, lastDest: last };
+      p.play(md);
+      last = md.to;
+    }
+  }
+
   /** エンジンへ送る position 行。choose はエンジンに送らない（盤面も手番も変えないため）。 */
   positionCommand(): string {
-    if (this.sfen41 && (this.pos || this.over)) {
-      return `position sfen ${this.sfen41}` + (this.normalMoves.length ? ` moves ${this.normalMoves.join(' ')}` : '');
+    if (this.startSfen && (this.pos || this.over)) {
+      return `position sfen ${this.startSfen}` + (this.normalMoves.length ? ` moves ${this.normalMoves.join(' ')}` : '');
     }
-    const drops = this.moves.filter((m) => m.ply !== null && m.usi !== 'resign').map((m) => m.usi);
+    const drops = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout').map((m) => m.usi);
     return 'position fuseki' + (drops.length ? ` moves ${drops.join(' ')}` : '');
   }
 
@@ -334,7 +401,7 @@ export class Game {
   viewAt(index: number): ViewState {
     const n = Math.max(0, Math.min(index, this.moves.length));
     if (n === this.moves.length) return this.view();
-    const g = rebuild(this.fuseki, this.mode, this.tokens().slice(0, n));
+    const g = rebuild(this.fuseki, this.mode, this.tokens().slice(0, n), { startSfen: this.mode === 'position' ? this.startSfen ?? undefined : undefined });
     const v = g.view();
     this.resyncWasm();
     return v;
@@ -343,8 +410,9 @@ export class Game {
   /** wasm の局面を自分の棋譜どおりに戻す（viewAt の後始末）。 */
   private resyncWasm(): void {
     this.fuseki.reset();
+    if (this.mode === 'position') return;
     for (const m of this.moves) {
-      if (m.phase === 'normal' || m.ply === null || m.usi === 'resign') continue;
+      if (m.phase === 'normal' || m.ply === null || m.usi === 'resign' || m.usi === 'timeout') continue;
       const d = this.fuseki.legalDrops().find((x) => x.usi === m.usi);
       if (!d) throw new Error(`wasm の局面を戻せない: ${m.usi}`);
       this.fuseki.drop(d);
@@ -352,9 +420,14 @@ export class Game {
   }
 }
 
+export interface RebuildOptions {
+  startSfen?: string;
+  times?: (MoveTime | undefined)[];
+}
+
 /** トークン列から対局を作り直す（待った・棋譜の読み込み・過去の局面の表示）。 */
-export function rebuild(fuseki: Fuseki, mode: Mode, tokens: string[]): Game {
-  const g = new Game(fuseki, mode);
-  for (const t of tokens) g.apply(t);
+export function rebuild(fuseki: Fuseki, mode: Mode, tokens: string[], opts: RebuildOptions = {}): Game {
+  const g = new Game(fuseki, mode, opts.startSfen);
+  tokens.forEach((t, i) => g.apply(t, opts.times?.[i]));
   return g;
 }

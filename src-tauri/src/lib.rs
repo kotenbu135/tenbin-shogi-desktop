@@ -82,6 +82,26 @@ fn path_is_dir(path: String) -> bool {
     std::path::Path::new(&path).is_dir()
 }
 
+/// 棋譜などのテキストを読む。UTF-8 でなければ Shift_JIS として読む（古い KIF は Shift_JIS が多い）。
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("読めない: {path} ({e})"))?;
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok(s.trim_start_matches('\u{feff}').to_string());
+    }
+    let (s, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&bytes);
+    if had_errors {
+        return Err("文字コードが分からない（UTF-8 でも Shift_JIS でもない）".into());
+    }
+    Ok(s.into_owned())
+}
+
+/// UTF-8 で書く。
+#[tauri::command]
+fn write_text_file(path: String, text: String) -> Result<(), String> {
+    std::fs::write(&path, text).map_err(|e| format!("書けない: {path} ({e})"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let host = Arc::new(EngineHost::new());
@@ -97,6 +117,8 @@ pub fn run() {
             engine_list,
             path_is_file,
             path_is_dir,
+            read_text_file,
+            write_text_file,
         ])
         .on_window_event(move |window, event| {
             // 窓を閉じたらエンジンを残さない。残すとやねうら王が Threads ぶんの CPU を握り続ける。

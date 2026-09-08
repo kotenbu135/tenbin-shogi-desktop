@@ -418,3 +418,62 @@ fieldset.kind { border: 1px solid var(--rule); padding: 8px 12px; display: grid;
 fieldset.kind legend { color: var(--ink-2); padding: 0 4px; }
 fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---- 矢印と印（検討の候補） ---- */
+.board { position: relative; }
+.board svg.shapes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.shape line { stroke: var(--gote); stroke-linecap: round; }
+.shape polygon { fill: var(--gote); }
+.shape .ring { fill: none; stroke: var(--gote); stroke-dasharray: 6 5; }
+.shape.r1 line, .shape.r1 .ring { stroke-width: 11; opacity: 0.85; }
+.shape.r1 .ring { stroke-width: 6; }
+.shape.r2 line, .shape.r2 .ring { stroke-width: 8; opacity: 0.55; }
+.shape.r2 .ring { stroke-width: 4; }
+.shape.r3 line, .shape.r3 .ring { stroke-width: 6; opacity: 0.4; }
+.shape.r3 .ring { stroke-width: 3; }
+.shape.r2 polygon { opacity: 0.55; }
+.shape.r3 polygon { opacity: 0.4; }
+.shape .badge { fill: var(--gote); }
+.shape .badge-text { fill: #fff; font-size: 20px; font-family: var(--font-ui); font-weight: 600; }
+
+/* ---- 時計 ---- */
+.plate { flex-wrap: wrap; }
+.plate-clock { margin-left: auto; font-feature-settings: 'tnum' 1; color: var(--ink-2); font-size: 0.95em; }
+.plate-clock.running { color: var(--ink); font-weight: 600; }
+.plate-clock.byoyomi.running { color: var(--sente); }
+
+/* ---- 棋譜の消費時間 ---- */
+.kifu-list.with-time .kifu-move { grid-template-columns: 36px 1fr auto; }
+.kifu-move .tm { color: var(--ink-3); font-size: 12px; white-space: nowrap; padding-left: 8px; }
+.kifu-move.current .tm { color: var(--bg); opacity: 0.8; }
+
+/* ---- 局面編集 ---- */
+.editor { background: var(--panel); border: 1px solid var(--rule); padding: 8px 12px; display: grid; gap: 6px; }
+.editor[hidden] { display: none; }
+.editor-head { display: flex; gap: 12px; align-items: baseline; }
+.editor-title { font-weight: 600; }
+.editor-hint { color: var(--ink-3); font-size: 12px; }
+.editor-body { display: grid; gap: 6px; }
+.palette-row { display: flex; align-items: center; gap: 3px; }
+.palette-label { width: 4em; color: var(--ink-2); }
+.palette-piece { position: relative; width: 38px; height: 41px; padding: 0; border: 1px solid transparent; background: transparent; }
+.palette-piece:hover { background: var(--panel-2); }
+.palette-piece.selected { background: var(--sel, rgba(20, 85, 30, 0.25)); border-color: var(--ink); }
+.palette-piece .piece { inset: 6% 8% 4% 8%; }
+.editor-tools { display: flex; align-items: center; gap: 10px; }
+.editor-tools button.selected { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.editor-holding { color: var(--ink-2); }
+.editor-turn { display: flex; gap: 12px; align-items: center; color: var(--ink-2); }
+.editor-turn label { display: flex; gap: 4px; align-items: center; color: var(--ink); }
+.editor-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.editor-actions .primary { margin-left: auto; }
+.shogi.editing .cell { cursor: pointer; }
+.shogi.editing .slot { cursor: pointer; }
+.shogi.editing .slot.dim { opacity: 0.35; }
+
+/* ---- 保存・新規対局のダイアログ ---- */
+.save-dialog, .newgame-dialog { width: min(560px, 92vw); border: 1px solid var(--rule-strong); border-radius: 0; padding: 0; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.save-dialog::backdrop, .newgame-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.save-choice { display: grid; gap: 2px; text-align: left; padding: 10px 14px; }
+.save-choice span { color: var(--ink-2); font-size: 12px; }
+.form-hint { align-self: end; padding-bottom: 6px; }
