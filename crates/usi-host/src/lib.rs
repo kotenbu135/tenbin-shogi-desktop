@@ -237,6 +237,49 @@ mod tests {
         assert!(host.send("e1", "usi").is_err());
     }
 
+    /// 実物のエンジンで usi → usiok → isready → readyok を通す。
+    /// `TENBIN_TEST_ENGINE`（実行ファイル）と任意で `TENBIN_TEST_EVALDIR` を渡し、`--ignored` で走らせる。
+    #[test]
+    #[ignore]
+    fn real_engine_handshake() {
+        let Ok(path) = std::env::var("TENBIN_TEST_ENGINE") else { return };
+        let host = EngineHost::new();
+        let (tx, rx) = mpsc::channel();
+        let sink: EventSink = Arc::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        host.start("y", Launch { path: PathBuf::from(path), args: vec![], cwd: None }, sink).unwrap();
+        host.send("y", "usi").unwrap();
+        let wait = |pred: &dyn Fn(&str) -> bool, secs: u64| -> Vec<String> {
+            let deadline = Instant::now() + Duration::from_secs(secs);
+            let mut seen = Vec::new();
+            while Instant::now() < deadline {
+                match rx.recv_timeout(Duration::from_millis(200)) {
+                    Ok(EngineEvent::Line { line, .. }) => {
+                        let hit = pred(&line);
+                        seen.push(line);
+                        if hit { return seen; }
+                    }
+                    Ok(EngineEvent::Exit { .. }) => panic!("エンジンが終了した: {seen:?}"),
+                    _ => {}
+                }
+            }
+            panic!("応答が無い: {seen:?}");
+        };
+        let lines = wait(&|l| l == "usiok", 15);
+        assert!(lines.iter().any(|l| l.starts_with("id name")), "id name が無い");
+        if let Ok(dir) = std::env::var("TENBIN_TEST_EVALDIR") {
+            host.send("y", &format!("setoption name EvalDir value {dir}")).unwrap();
+        }
+        host.send("y", "isready").unwrap();
+        wait(&|l| l == "readyok", 120);
+        host.send("y", "position startpos").unwrap();
+        host.send("y", "go nodes 5000").unwrap();
+        let lines = wait(&|l| l.starts_with("bestmove"), 60);
+        assert!(lines.iter().any(|l| l.starts_with("info") && l.contains("score")), "info score が無い");
+        host.stop("y", Duration::from_secs(3)).unwrap();
+    }
+
     #[test]
     fn missing_binary_is_an_error() {
         let host = EngineHost::new();

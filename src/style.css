@@ -313,20 +313,26 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 /* 天秤グラフ */
 .graph { height: 150px; background: var(--panel); border: 1px solid var(--rule); }
 .tenbin { width: 100%; height: 100%; display: block; }
-.tenbin .post, .tenbin .arm, .tenbin .pan line { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
-.tenbin .arm { stroke-width: 2.5; }
-.tenbin .beam > g { transition: transform 300ms ease; }
-.tenbin .pan.sente rect { fill: var(--sente); }
-.tenbin .pan.gote rect { fill: none; stroke: var(--gote); stroke-width: 2; }
+.tenbin .scale .base, .tenbin .scale .post, .tenbin .scale .arm, .tenbin .scale .string {
+  fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.tenbin .scale .base { fill: var(--ink); stroke-width: 3; }
+.tenbin .scale .arm { stroke-width: 3; }
+.tenbin .scale .string { stroke-width: 1; }
+.tenbin .scale > g { transition: transform 400ms ease; }
+.tenbin .pan.sente .dish { fill: var(--sente); stroke: none; }
+.tenbin .pan.gote .dish { fill: var(--panel); stroke: var(--gote); stroke-width: 2; }
 .tenbin .pan-label { font-size: 12px; fill: var(--ink-2); font-family: var(--font-ui); }
 .tenbin .band.fuseki { fill: var(--panel-2); }
+.tenbin .axis-line { stroke: var(--rule-strong); stroke-width: 1; }
 .tenbin .mid { stroke: var(--rule-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .tenbin .edge { stroke: var(--rule-strong); stroke-width: 1; }
 .tenbin .axis { font-size: 10px; fill: var(--ink-3); font-family: var(--font-ui); }
+.tenbin .axis.label { font-size: 11px; fill: var(--ink-2); }
 .tenbin .line { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .tenbin .pt { fill: var(--sente); }
 .tenbin .cursor { stroke: var(--gote); stroke-width: 1.5; }
-@media (prefers-reduced-motion: reduce) { .tenbin .beam > g { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tenbin .scale > g { transition: none; } }
 
 /* 右列 */
 .side-head { padding: 10px 12px; }
