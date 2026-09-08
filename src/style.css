@@ -360,9 +360,11 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .kifu-foot { padding: 6px 12px; border-top: 1px solid var(--rule); color: var(--ink-2); font-size: 12px; }
 .kifu-foot[hidden] { display: none; }
 
-.analysis { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
+/* 列は minmax(0, 1fr)。auto だと select の固有幅（長いエンジン名）が列を押し広げ、右端が切れる */
+.analysis { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 .analysis-head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
-.analysis-head select { flex: 1; min-width: 0; }
+.analysis-head select { flex: 1 1 0; width: 0; min-width: 0; }
+.analysis-head button { flex: none; white-space: nowrap; }
 .analysis-status { display: flex; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
 .analysis-notice { padding: 6px 12px; color: var(--ink-2); background: var(--panel-2); }
 .analysis-notice .link { margin-left: 4px; }

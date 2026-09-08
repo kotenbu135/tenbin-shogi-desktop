@@ -82,6 +82,22 @@ bestmove P*7g
 - `info` は `winrate` があればそれを、無ければ `score cp` を換算して**先手の勝率**に直し、
   天秤グラフと候補表に載せる（`src/ui/analysis.ts`）。
 
+## 実装（2026-09-08）
+
+開発リポジトリ fuseki-shogi-ai の `scripts/fuseki_usi_server.py`。テストは `scripts/test_fuseki_usi_server.py`。
+
+- `value` と `twoply` を実装。`rollout` は未実装（オプションは受けるが `value` で動く）
+- 候補は方策（公開版と同じ `fuseki_degct_b3_iter1177.onnx`）の上位 `Fuseki_Candidates`（既定 16）手に絞ってから
+  価値ネット `value_mid_v2_10x128`（GCT フリー）で採点する。合法手すべてを採点すると、方策が選ばない手の中から
+  価値ネットの盲点を突く手が上に来る（開発リポジトリ `docs/plan-search-at-playtime.md` の食い破り）
+- 天秤将棋（`Fuseki_Mode=tenbin`）の 1〜2 手目は玉だけを候補にし、2 手目は両玉の価値表 `king_pairs_iter1177_games.json` を引く
+- `info` に独自語 `prior`（方策の確率）を足している。GUI は知らない語を読み飛ばす
+- 40 手目の候補で後手玉が先手の利きに当たる形は勝率 0。41 手目の裁定に当たる局面の `go` は `bestmove win`
+- 41 手目からは `Normal_Engine`（既定は開発リポジトリの vendor のやねうら王）へ中継
+
+GUI への登録: 実行ファイル `fuseki-shogi-ai/.venv/bin/python`、引数 `scripts/fuseki_usi_server.py`、
+作業フォルダ `fuseki-shogi-ai`、使える局面「布石にも対応」。
+
 ## 未決
 
 - `Fuseki_Method=rollout` の所要時間と `value` との順位一致率は未計測（開発リポジトリ M3）。

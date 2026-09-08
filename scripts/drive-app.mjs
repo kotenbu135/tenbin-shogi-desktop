@@ -31,6 +31,16 @@ const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stri
 console.log(await step('.stand.sente .slot[data-role="king"]'), await step('.cell[data-sq="5i"]'));
 console.log(await step('.stand.gote .slot[data-role="king"]'), await step('.cell[data-sq="5a"]'));
 console.log(await ev('(()=>{const b=[...document.querySelectorAll(".choose button")][0]; b.click(); return "chose"})()'));
+// 布石中（3手目）の検討: 布石対応エンジンなら候補が並ぶ
+console.log('fuseki analysis:', await step('[data-act="toggle"]'));
+for (let t = 0; t < 60; t++) { await sleep(500); const rows = await ev('document.querySelectorAll(".cand").length'); if (rows >= 3) break; }
+console.log('fuseki stats:', await ev('document.querySelector(".engine-name").textContent + " | " + document.querySelector(".engine-stats").textContent'));
+console.log('fuseki rows:', await ev('[...document.querySelectorAll(".cand")].map(r=>r.textContent.replace(/\\s+/g," ").trim()).join("\\n")'));
+console.log('fuseki notice:', await ev('document.querySelector(".analysis-notice").hidden ? "" : document.querySelector(".analysis-notice").textContent'));
+await sleep(600);
+await shot(`${OUT}/app-fuseki-analysis.png`);
+console.log('stop:', await step('[data-act="toggle"]'));
+await sleep(500);
 for (let i = 0; i < 38; i++) {
   const r = await ev(`(()=>{const t=document.getElementById("status").textContent.includes("先手")?"sente":"gote"; const h=document.querySelector(".stand."+t+" .slot:not(:disabled)"); if(!h) return "no hand"; h.click(); const d=document.querySelector(".cell.dest"); if(!d) return "no dest"; d.click(); return "ok"})()`);
   if (r !== 'ok') { console.log('step', i, r); break; }
