@@ -6,13 +6,17 @@
 //   choose        : 選ぶ役が先手／後手を持つと宣言する。盤面も手番も変わらない
 //   fuseki 3〜40手: 交互に置く
 //   normal 41手〜 : 本将棋。41手目の裁定（後手玉が取れるなら先手の勝ち）を通した局面から
+//
+// 符号は日本将棋連盟の表記に従う（shogiops の日本語表記を使う）。
+//   同　銀 / ５八金左 / 打は盤上の駒が同じマスへ動けるときだけ。布石中は動ける駒が無いので打は付けない。
 
 import { parseSfen } from 'shogiops/sfen';
 import { makeSquareName, parseSquareName, parseUsi } from 'shogiops/util';
 import { handRoles, pieceCanPromote, pieceForcePromote } from 'shogiops/variant/util';
+import { makeJapaneseMoveOrDrop } from 'shogiops/notation/japanese';
 import type { Shogi } from 'shogiops/variant/shogi';
-import type { MoveOrDrop, Piece as OpsPiece, Role as OpsRole } from 'shogiops/types';
-import { BLACK, WHITE, type Drop, type Fuseki, type Role as DropRole } from '../rules/fuseki.ts';
+import type { MoveOrDrop, Piece as OpsPiece, Role as OpsRole, Square } from 'shogiops/types';
+import { BLACK, WHITE, type Drop, type Fuseki } from '../rules/fuseki.ts';
 
 export type Color = 'sente' | 'gote';
 export type Phase = 'kings' | 'choose' | 'fuseki' | 'normal' | 'over';
@@ -31,7 +35,7 @@ export interface MoveRecord {
   color: Color | null;
   /** "P*7g" / "7g7f" / "choose:sente" / "resign" */
   usi: string;
-  /** 表示用 "☗７六歩打" */
+  /** 符号 "７六歩"（先後の記号は付けない。表示側が ☗☖ を添える） */
   text: string;
   phase: Phase;
 }
@@ -40,7 +44,10 @@ export interface BoardSnapshot {
   pieces: Map<string, Piece>;
   hands: Record<Color, Map<OpsRole, number>>;
   turn: Color;
+  /** 直前の手の行き先 */
   lastSquare: string | null;
+  /** 直前の手の出発点（本将棋の移動のみ） */
+  lastFrom: string | null;
   /** 王手中の玉のマス（本将棋のみ） */
   checkSquare: string | null;
 }
@@ -50,11 +57,22 @@ export interface GameOver {
   reason: string;
 }
 
+/** 棋譜のある地点の局面。過去の局面を見る・検討するときに使う。 */
+export interface ViewState {
+  snapshot: BoardSnapshot;
+  positionCmd: string;
+  phase: Phase;
+  turn: Color;
+  /** その局面までに指された手数 */
+  ply: number;
+  over: GameOver | null;
+}
+
 const RANK_KANJI = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const FILE_ZEN = ['１', '２', '３', '４', '５', '６', '７', '８', '９'];
 export const ROLE_KANJI: Record<string, string> = {
   pawn: '歩', lance: '香', knight: '桂', silver: '銀', gold: '金', bishop: '角', rook: '飛', king: '玉',
-  tokin: 'と', promotedlance: '杏', promotedknight: '圭', promotedsilver: '全', horse: '馬', dragon: '龍',
+  tokin: 'と', promotedlance: '成香', promotedknight: '成桂', promotedsilver: '成銀', horse: '馬', dragon: '龍',
 };
 
 export function squareText(sq: string): string {
@@ -63,8 +81,12 @@ export function squareText(sq: string): string {
   return `${FILE_ZEN[f - 1] ?? sq[0]}${RANK_KANJI[r] ?? sq[1]}`;
 }
 
-function colorMark(c: Color): string {
+export function colorMark(c: Color): string {
   return c === 'sente' ? '☗' : '☖';
+}
+
+export function colorName(c: Color): string {
+  return c === 'sente' ? '先手' : '後手';
 }
 
 export class Game {
@@ -74,6 +96,7 @@ export class Game {
   private normalMoves: string[] = [];
   private readonly fusekiBoard = new Map<string, Piece>();
   private lastSquare: string | null = null;
+  private lastFrom: string | null = null;
   private chosen: Color | null = null;
   over: GameOver | null = null;
 
@@ -174,8 +197,8 @@ export class Game {
   private applyResign(): MoveRecord {
     const loser = this.turn;
     const phase = this.phase;
-    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason: `${loser === 'sente' ? '先手' : '後手'}の投了` };
-    return this.push({ ply: this.nextPly, color: loser, usi: 'resign', text: `${colorMark(loser)}投了`, phase });
+    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason: `${colorName(loser)}の投了` };
+    return this.push({ ply: this.nextPly, color: loser, usi: 'resign', text: '投了', phase });
   }
 
   private applyDrop(token: string): MoveRecord {
@@ -188,10 +211,9 @@ export class Game {
     this.fuseki.drop(found);
     this.fusekiBoard.set(found.square, { color, role: found.role });
     this.lastSquare = found.square;
-    const rec = this.push({
-      ply, color, usi: token, phase,
-      text: `${colorMark(color)}${squareText(found.square)}${ROLE_KANJI[found.role]}打`,
-    });
+    this.lastFrom = null;
+    // 布石中は盤上の駒が動けないので「打」は付けない（連盟の表記）
+    const rec = this.push({ ply, color, usi: token, phase, text: `${squareText(found.square)}${ROLE_KANJI[found.role]}` });
     if (this.fuseki.isPlacementDone) this.enterNormal();
     return rec;
   }
@@ -215,17 +237,10 @@ export class Game {
     if (!md || !pos.isLegal(md)) throw new Error(`合法手ではない: ${token}`);
     const color = pos.turn;
     const ply = this.nextPly;
-    let text: string;
-    if ('from' in md) {
-      const piece = pos.board.get(md.from)!;
-      const to = makeSquareName(md.to);
-      text = `${colorMark(color)}${squareText(to)}${ROLE_KANJI[piece.role] ?? piece.role}${md.promotion ? '成' : ''}`;
-      this.lastSquare = to;
-    } else {
-      const to = makeSquareName(md.to);
-      text = `${colorMark(color)}${squareText(to)}${ROLE_KANJI[md.role] ?? md.role}打`;
-      this.lastSquare = to;
-    }
+    const lastDest = this.lastSquare ? parseSquareName(this.lastSquare) : undefined;
+    const text = makeJapaneseMoveOrDrop(pos, md, lastDest) ?? token;
+    this.lastFrom = 'from' in md ? makeSquareName(md.from) : null;
+    this.lastSquare = makeSquareName(md.to);
     pos.play(md);
     this.normalMoves.push(token);
     const rec = this.push({ ply, color, usi: token, text, phase: 'normal' });
@@ -236,9 +251,34 @@ export class Game {
     return rec;
   }
 
-  /** 最後の1手（または選択）を取り消す。wasm は巻き戻せないので最初から再生する。 */
-  undoTokens(): string[] {
-    return this.moves.slice(0, -1).map((m) => m.usi);
+  /** 読み筋（USI）を符号の列にする。本将棋は局面を進めながら、布石は駒打ちとして読む。 */
+  japanesePv(usis: string[]): string[] {
+    const out: string[] = [];
+    if (this.pos) {
+      const p = this.pos.clone();
+      let last: Square | undefined = this.lastSquare ? parseSquareName(this.lastSquare) : undefined;
+      for (const u of usis) {
+        const md = parseUsi(u);
+        if (!md || !p.isLegal(md)) break;
+        out.push(`${colorMark(p.turn)}${makeJapaneseMoveOrDrop(p, md, last) ?? u}`);
+        p.play(md);
+        last = md.to;
+      }
+      return out;
+    }
+    let turn = this.turn;
+    for (const u of usis) {
+      if (u.length < 4 || u[1] !== '*') break;
+      const role = { P: 'pawn', L: 'lance', N: 'knight', S: 'silver', G: 'gold', B: 'bishop', R: 'rook', K: 'king' }[u[0]!];
+      if (!role) break;
+      out.push(`${colorMark(turn)}${squareText(u.slice(2, 4))}${ROLE_KANJI[role]}`);
+      turn = turn === 'sente' ? 'gote' : 'sente';
+    }
+    return out;
+  }
+
+  tokens(): string[] {
+    return this.moves.map((m) => m.usi);
   }
 
   /** エンジンへ送る position 行。choose はエンジンに送らない（盤面も手番も変えないため）。 */
@@ -267,19 +307,52 @@ export class Game {
         const k = this.pos.board.pieces(this.pos.turn, 'king').first();
         if (k !== undefined) checkSquare = makeSquareName(k);
       }
-      return { pieces, hands, turn: this.pos.turn, lastSquare: this.lastSquare, checkSquare };
+      return { pieces, hands, turn: this.pos.turn, lastSquare: this.lastSquare, lastFrom: this.lastFrom, checkSquare };
     }
     const hands: Record<Color, Map<OpsRole, number>> = {
       sente: this.fuseki.remaining(BLACK) as Map<OpsRole, number>,
       gote: this.fuseki.remaining(WHITE) as Map<OpsRole, number>,
     };
-    return { pieces: new Map(this.fusekiBoard), hands, turn: this.turn, lastSquare: this.lastSquare, checkSquare: null };
+    return { pieces: new Map(this.fusekiBoard), hands, turn: this.turn, lastSquare: this.lastSquare, lastFrom: null, checkSquare: null };
+  }
+
+  view(): ViewState {
+    return {
+      snapshot: this.snapshot(),
+      positionCmd: this.positionCommand(),
+      phase: this.phase,
+      turn: this.turn,
+      ply: this.nextPly - 1,
+      over: this.over,
+    };
+  }
+
+  /**
+   * 棋譜の index 手目まで進めた局面。wasm の実体は1つなので、一時的に作り直してから
+   * 自分の局面へ戻す（40手の再生は数ミリ秒）。
+   */
+  viewAt(index: number): ViewState {
+    const n = Math.max(0, Math.min(index, this.moves.length));
+    if (n === this.moves.length) return this.view();
+    const g = rebuild(this.fuseki, this.mode, this.tokens().slice(0, n));
+    const v = g.view();
+    this.resyncWasm();
+    return v;
+  }
+
+  /** wasm の局面を自分の棋譜どおりに戻す（viewAt の後始末）。 */
+  private resyncWasm(): void {
+    this.fuseki.reset();
+    for (const m of this.moves) {
+      if (m.phase === 'normal' || m.ply === null || m.usi === 'resign') continue;
+      const d = this.fuseki.legalDrops().find((x) => x.usi === m.usi);
+      if (!d) throw new Error(`wasm の局面を戻せない: ${m.usi}`);
+      this.fuseki.drop(d);
+    }
   }
 }
 
-export type { DropRole };
-
-/** トークン列から対局を作り直す（待った・棋譜の読み込み）。 */
+/** トークン列から対局を作り直す（待った・棋譜の読み込み・過去の局面の表示）。 */
 export function rebuild(fuseki: Fuseki, mode: Mode, tokens: string[]): Game {
   const g = new Game(fuseki, mode);
   for (const t of tokens) g.apply(t);

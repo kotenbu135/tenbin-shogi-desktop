@@ -1,76 +1,71 @@
 /* 天秤将棋 デスクトップ
  *
- * 色は「銀鼠の地、榧の盤、朱と藍」。地は紙色ではなく灰にして盤の木色を立て、
- * 朱＝先手・藍＝後手は天秤の皿と検討の帯にだけ使う。塗り＝先手、輪郭＝後手の規約は
- * 公開版サイトと同じ。角丸は操作部品の 4px だけ、面には付けない。
+ * 盤と駒は公開版サイトと同じ（盤の色 #f9b34e と CSS の木目、駒は lishogi kanji_light）。
+ * 周りの地は銀鼠。朱＝先手・藍＝後手は天秤の皿と検討の帯にだけ使い、
+ * 塗り＝先手（☗）、輪郭＝後手（☖）の規約は公開版と同じ。角丸は操作部品の 4px だけ。
  */
 :root {
   color-scheme: light;
-  --bg: #e3e0d8;
+  --bg: #e6e3dc;
   --panel: #faf9f5;
-  --panel-2: #f1efe9;
-  --rule: #cdc9be;
-  --rule-strong: #9d9a90;
+  --panel-2: #f0eee8;
+  --rule: #d2cec3;
+  --rule-strong: #a09c92;
   --ink: #23262a;
   --ink-2: #5b5f66;
   --ink-3: #8c9096;
-  --board: #e7cb8f;
-  --board-line: #7b5a34;
-  --piece: #fbf3dc;
-  --piece-line: #3a2e1f;
   --sente: #b93c2c;
   --gote: #2f4e73;
-  --sel: rgba(185, 60, 44, 0.22);
-  --dest: rgba(47, 78, 115, 0.3);
-  --last: rgba(185, 60, 44, 0.16);
-  --check: rgba(185, 60, 44, 0.45);
-  --font-ui: 'Noto Sans JP', 'Yu Gothic UI', 'Hiragino Sans', 'Segoe UI', system-ui, sans-serif;
-  --font-piece: 'Noto Serif JP', 'Yu Mincho', 'Hiragino Mincho ProN', 'HGMinchoE', 'Noto Serif CJK JP', serif;
+  /* 盤。公開版サイトと同じ値。明暗で変えない（駒の朱字と成駒の判別が落ちる） */
+  --board: #f9b34e;
+  --board-edge: #6f5027;
+  --stand: #d9994c;
+  --stand-edge: #5f4320;
+  --line: #000;
+  --selected: rgba(20, 85, 30, 0.5);
+  --selected-hover: rgba(20, 85, 30, 0.25);
+  --last-dest: rgba(169, 199, 0, 0.41);
+  --last-from: rgba(169, 199, 0, 0.2);
+  --check: rgba(204, 51, 34, 0.5);
+  --zone: rgba(70, 35, 0, 0.085);
+  --font-ui: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', 'Noto Sans JP', 'Noto Sans CJK JP', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', 'Noto Serif CJK JP', 'MS Mincho', serif;
   --radius: 4px;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
-    --bg: #1f2327;
-    --panel: #292e33;
-    --panel-2: #30363c;
-    --rule: #3d444b;
-    --rule-strong: #5a626a;
+    --bg: #1c1f22;
+    --panel: #272b2f;
+    --panel-2: #2f3438;
+    --rule: #3c4247;
+    --rule-strong: #5c636a;
     --ink: #e9e6df;
     --ink-2: #b3b0a8;
     --ink-3: #7f8489;
-    --board: #d5b97c;
-    --board-line: #4a361c;
-    --piece: #f3e9ce;
-    --piece-line: #2e2416;
     --sente: #d65a48;
     --gote: #6e93c0;
-    --sel: rgba(214, 90, 72, 0.3);
-    --dest: rgba(110, 147, 192, 0.35);
-    --last: rgba(214, 90, 72, 0.22);
-    --check: rgba(214, 90, 72, 0.5);
+    --board-edge: #2b2018;
+    --stand-edge: #221a10;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1f2327;
-  --panel: #292e33;
-  --panel-2: #30363c;
-  --rule: #3d444b;
-  --rule-strong: #5a626a;
+  --bg: #1c1f22;
+  --panel: #272b2f;
+  --panel-2: #2f3438;
+  --rule: #3c4247;
+  --rule-strong: #5c636a;
   --ink: #e9e6df;
   --ink-2: #b3b0a8;
   --ink-3: #7f8489;
-  --board: #d5b97c;
-  --board-line: #4a361c;
-  --piece: #f3e9ce;
-  --piece-line: #2e2416;
   --sente: #d65a48;
   --gote: #6e93c0;
-  --sel: rgba(214, 90, 72, 0.3);
-  --dest: rgba(110, 147, 192, 0.35);
-  --last: rgba(214, 90, 72, 0.22);
-  --check: rgba(214, 90, 72, 0.5);
+  --board-edge: #2b2018;
+  --stand-edge: #221a10;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 * { box-sizing: border-box; }
@@ -84,21 +79,26 @@ body {
   font-feature-settings: 'tnum' 1;
   user-select: none;
   -webkit-user-select: none;
+  overflow: hidden;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button {
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
   background: var(--panel);
   cursor: pointer;
+  line-height: 1.3;
 }
 button:hover { background: var(--panel-2); }
-button:disabled { opacity: 0.45; cursor: default; }
+button:disabled { opacity: 0.4; cursor: default; }
 button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 button.primary:hover { opacity: 0.9; }
-button.link { border: 0; background: none; padding: 0; color: var(--gote); text-decoration: underline; }
+button.link { display: inline; border: 0; background: none; padding: 0; color: var(--gote); text-decoration: underline; }
 button.danger { color: var(--sente); }
+button svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+button svg.stroke { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 :focus-visible { outline: 2px solid var(--gote); outline-offset: 2px; }
 input[type='text'], input[type='number'], input:not([type]), select, textarea {
   padding: 0.3rem 0.5rem;
@@ -111,9 +111,9 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 
 /* 骨格 */
 .app { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; }
-.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px; min-height: 0; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; padding: 12px; min-height: 0; }
 .stage { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; min-height: 0; }
-.side { display: grid; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); gap: 12px; min-height: 0; }
+.side { display: grid; grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; min-height: 0; }
 .side > * { background: var(--panel); border: 1px solid var(--rule); min-height: 0; overflow: hidden; }
 @media (max-width: 1100px) {
   .main { grid-template-columns: minmax(0, 1fr); }
@@ -122,120 +122,199 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 
 /* ツールバー */
 .toolbar {
-  display: flex; align-items: center; gap: 16px;
-  padding: 8px 12px;
+  display: flex; align-items: center; gap: 20px;
+  padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--rule);
 }
-.brand { display: flex; align-items: center; gap: 8px; font-family: var(--font-piece); font-size: 18px; letter-spacing: 0.08em; margin-right: 8px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-serif); font-size: 19px; letter-spacing: 0.1em; margin-right: 4px; }
 .brand-mark { width: 18px; height: 18px; display: inline-block; position: relative; }
 .brand-mark::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: var(--ink); transform: rotate(-8deg); }
 .brand-mark::after { content: ''; position: absolute; left: 8px; top: 3px; width: 2px; height: 14px; background: var(--ink); }
 .tools { display: flex; gap: 6px; }
 .tools.right { margin-left: auto; }
+.tools button { padding: 0.45rem 0.9rem; }
 .tools button[aria-pressed='true'] { background: var(--panel-2); border-color: var(--ink); }
 
-/* 盤 */
-/* 盤の大きさは JS（ResizeObserver）が --board-size に入れる。CSS だけで
-   「高さと幅の小さい方に合わせた正方形」を作ると、親の高さが auto のときに崩れる。 */
-.board-area {
-  --board-size: 480px;
+/* ---- 盤・駒台・名札 ---- */
+.board-area { min-height: 0; min-width: 0; overflow: hidden; }
+.shogi {
+  --sq: 56px;                          /* マスの幅。JS が使える広さから決める */
+  --sqh: calc(var(--sq) * 1.09);       /* マスは縦長（1尺2寸 × 1尺1寸） */
+  --gap: calc(var(--sq) * 0.35);
+  height: 100%;
   display: grid;
-  grid-template-columns: 68px minmax(0, 1fr) 68px;
-  gap: 10px;
-  align-items: stretch;
-  min-height: 0;
-  min-width: 0;
-  padding: 8px;
-  overflow: hidden;
+  grid-template-columns: auto auto auto;
+  justify-content: center;
+  align-content: center;
+  gap: var(--gap);
+  padding: 12px;
+}
+.board-wrap { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; }
+.files {
+  grid-column: 1; grid-row: 1;
+  display: grid; grid-template-columns: repeat(9, var(--sq));
+  height: calc(var(--sq) * 0.5);
+  align-items: end; text-align: center;
+  padding: 0 3px 3px;                 /* 盤の縁（3px）ぶん寄せる */
+  font-size: calc(var(--sq) * 0.27); color: var(--ink-2);
+}
+.ranks {
+  grid-column: 2; grid-row: 2;
+  display: grid; grid-template-rows: repeat(9, var(--sqh));
+  width: calc(var(--sq) * 0.55);
+  align-items: center; text-align: center;
+  padding: 3px 0;
+  font-size: calc(var(--sq) * 0.27); color: var(--ink-2);
+  font-family: var(--font-serif);
 }
 .board {
-  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr;
-  justify-self: center; align-self: center;
-  width: var(--board-size); height: var(--board-size);
+  grid-column: 1; grid-row: 2;
+  width: calc(var(--sq) * 9); height: calc(var(--sqh) * 9);
+  box-sizing: content-box;
+  border: 3px solid var(--board-edge);
+  border-radius: 2px;
+  background-color: var(--board);
+  /* 木目。公開版サイトと同じ（lishogi の既定盤の実測に合わせた縞） */
+  background-image:
+    repeating-linear-gradient(90deg, #00000007 0 1px, #0000 1px 4px),
+    repeating-linear-gradient(90deg, #ffffff09 0 1px, #0000 1px 7px),
+    repeating-linear-gradient(90deg, #00000004 0 2px, #0000 2px 11px),
+    repeating-linear-gradient(90deg, #ffffff06 0 3px, #0000 3px 17px),
+    repeating-linear-gradient(90deg, #00000004 0 1px, #0000 1px 23px);
+  box-shadow: var(--shadow);
+  transition: border-color 0.4s ease;
 }
-.board .files { grid-column: 2; display: grid; grid-template-columns: repeat(9, 1fr); text-align: center; color: var(--ink-2); font-size: 12px; }
-.board .ranks { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(9, 1fr); align-items: center; color: var(--ink-2); font-size: 12px; padding-right: 4px; }
+/* 41手目からは盤の縁の色を変える。ルールが変わったことが文を読まなくても見える（公開版と同じ） */
+.shogi.phase-normal .board { border-color: var(--ink); }
 .grid {
-  grid-column: 2; grid-row: 2;
   display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(9, 1fr);
-  background: var(--board);
-  border: 2px solid var(--board-line);
-  position: relative;
+  width: 100%; height: 100%;
+  border-top: 1px solid var(--line); border-left: 1px solid var(--line);
 }
 .cell {
-  position: relative;
-  padding: 0; margin: 0;
-  border: 0; border-radius: 0;
+  position: relative; display: block;
+  padding: 0; margin: 0; border: 0; border-radius: 0;
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
   background: transparent;
-  box-shadow: inset -1px -1px 0 var(--board-line);
   cursor: pointer;
 }
+/* button の :hover / :disabled（地の色・薄さ）を盤のマスには効かせない */
+.cell:hover { background: transparent; }
 .cell:disabled { cursor: default; opacity: 1; }
-.cell:hover { background: rgba(0, 0, 0, 0.05); }
-.cell.last { background: var(--last); }
-.cell.selected { background: var(--sel); }
-.cell.check { background: var(--check); }
-.cell.dest::after {
-  content: ''; position: absolute; inset: 0; margin: auto;
-  width: 28%; height: 28%; border-radius: 50%;
-  background: var(--dest);
+/* 星。３四・６四・３七・６七の交点（左上から 31, 34, 58, 61 番目のマスの左上角） */
+.cell:nth-child(31)::before, .cell:nth-child(34)::before, .cell:nth-child(58)::before, .cell:nth-child(61)::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 10%; height: 10%; margin: -5%;
+  background: var(--line); border-radius: 50%; z-index: 1; pointer-events: none;
 }
-.cell.dest:has(.piece)::after { width: 100%; height: 100%; border-radius: 0; background: var(--dest); }
+/* 布石中は手番側の陣（自陣四段）を淡く塗る。置ける範囲が駒を掴む前から見える */
+.cell.zone { background-color: var(--zone); }
+.cell.last { background-color: var(--last-dest); }
+.cell.last-from { background-color: var(--last-from); }
+.cell.check { background-color: var(--check); }
+.cell.selected { background-color: var(--selected); }
+/* 着手できるマス。空きマスは点、駒がいるマスは輪（lishogi と同じ） */
+.cell.dest { background: radial-gradient(var(--selected) 19%, rgba(0, 0, 0, 0) 20%); }
+.cell.dest.oc { background: radial-gradient(transparent 0%, transparent 80%, var(--selected) 80%); }
+.cell.dest:hover { background: var(--selected-hover); }
 .cell .mark {
-  position: absolute; top: 2px; right: 3px;
-  font-size: 11px; line-height: 1; color: var(--panel); background: var(--gote);
-  padding: 1px 4px; border-radius: var(--radius);
-}
-/* 星（4つの点）。background-position の % は「盤の幅 − 点の幅」基準なので、
-   点を 8px と小さくして 1/3・2/3 に置く。 */
-.grid { background-image:
-  radial-gradient(circle, var(--board-line) 2.5px, transparent 3px),
-  radial-gradient(circle, var(--board-line) 2.5px, transparent 3px),
-  radial-gradient(circle, var(--board-line) 2.5px, transparent 3px),
-  radial-gradient(circle, var(--board-line) 2.5px, transparent 3px);
-  background-repeat: no-repeat;
-  background-position: calc(100% / 3) calc(100% / 3), calc(200% / 3) calc(100% / 3), calc(100% / 3) calc(200% / 3), calc(200% / 3) calc(200% / 3);
-  background-size: 8px 8px;
-}
-
-/* 駒：五角形の紙色に墨の楷書。後手は 180 度回す。 */
-.piece {
-  position: absolute; inset: 6% 9% 4% 9%;
-  display: grid; place-items: center;
-  font-family: var(--font-piece);
-  font-weight: 600;
-  font-size: clamp(12px, 3.2vmin, 30px);
-  color: var(--piece-line);
-  background: var(--piece);
-  clip-path: polygon(50% 0, 90% 16%, 100% 100%, 0 100%, 10% 16%);
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.35));
+  position: absolute; top: 3%; right: 4%; z-index: 2;
+  min-width: 1.5em; padding: 0 0.3em;
+  font-size: calc(var(--sq) * 0.22); line-height: 1.5; text-align: center;
+  color: #fff; background: var(--gote); border-radius: 2px;
   pointer-events: none;
-  line-height: 1;
-  padding-top: 8%;
 }
-.piece.gote { transform: rotate(180deg); }
-.piece.promoted { color: var(--sente); }
 
-/* 駒台：後手は左上、先手は右下 */
-.hand { display: flex; flex-direction: column; gap: 6px; padding: 8px 4px; background: var(--panel); border: 1px solid var(--rule); align-content: start; }
-.hand-gote { justify-content: flex-start; }
-.hand-sente { justify-content: flex-end; }
-.hand-piece {
-  position: relative; width: 56px; height: 56px; padding: 0;
-  border: 1px solid transparent; border-radius: var(--radius); background: transparent;
+/* 駒：画像（kanji_light）。後手は回転済みの別ファイルなので CSS では回さない */
+.piece {
+  position: absolute; inset: 4% 6% 3% 6%;
+  background-size: contain; background-position: center; background-repeat: no-repeat;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+  pointer-events: none;
 }
-.hand-piece:hover:not(:disabled) { background: var(--panel-2); }
-.hand-piece.selected { background: var(--sel); border-color: var(--sente); }
-.hand-piece .piece { inset: 8% 12% 6% 12%; font-size: 22px; }
-.hand-piece .count { position: absolute; right: 2px; bottom: 0; font-size: 12px; color: var(--ink-2); }
-.hand-piece:disabled .piece { opacity: 0.55; }
+.piece[data-code='0FU'] { background-image: url('/pieces/0FU.svg'); }
+.piece[data-code='0KY'] { background-image: url('/pieces/0KY.svg'); }
+.piece[data-code='0KE'] { background-image: url('/pieces/0KE.svg'); }
+.piece[data-code='0GI'] { background-image: url('/pieces/0GI.svg'); }
+.piece[data-code='0KI'] { background-image: url('/pieces/0KI.svg'); }
+.piece[data-code='0KA'] { background-image: url('/pieces/0KA.svg'); }
+.piece[data-code='0HI'] { background-image: url('/pieces/0HI.svg'); }
+.piece[data-code='0GY'] { background-image: url('/pieces/0GY.svg'); }
+.piece[data-code='0OU'] { background-image: url('/pieces/0OU.svg'); }
+.piece[data-code='0TO'] { background-image: url('/pieces/0TO.svg'); }
+.piece[data-code='0NY'] { background-image: url('/pieces/0NY.svg'); }
+.piece[data-code='0NK'] { background-image: url('/pieces/0NK.svg'); }
+.piece[data-code='0NG'] { background-image: url('/pieces/0NG.svg'); }
+.piece[data-code='0UM'] { background-image: url('/pieces/0UM.svg'); }
+.piece[data-code='0RY'] { background-image: url('/pieces/0RY.svg'); }
+.piece[data-code='1FU'] { background-image: url('/pieces/1FU.svg'); }
+.piece[data-code='1KY'] { background-image: url('/pieces/1KY.svg'); }
+.piece[data-code='1KE'] { background-image: url('/pieces/1KE.svg'); }
+.piece[data-code='1GI'] { background-image: url('/pieces/1GI.svg'); }
+.piece[data-code='1KI'] { background-image: url('/pieces/1KI.svg'); }
+.piece[data-code='1KA'] { background-image: url('/pieces/1KA.svg'); }
+.piece[data-code='1HI'] { background-image: url('/pieces/1HI.svg'); }
+.piece[data-code='1GY'] { background-image: url('/pieces/1GY.svg'); }
+.piece[data-code='1OU'] { background-image: url('/pieces/1OU.svg'); }
+.piece[data-code='1TO'] { background-image: url('/pieces/1TO.svg'); }
+.piece[data-code='1NY'] { background-image: url('/pieces/1NY.svg'); }
+.piece[data-code='1NK'] { background-image: url('/pieces/1NK.svg'); }
+.piece[data-code='1NG'] { background-image: url('/pieces/1NG.svg'); }
+.piece[data-code='1UM'] { background-image: url('/pieces/1UM.svg'); }
+.piece[data-code='1RY'] { background-image: url('/pieces/1RY.svg'); }
+
+/* 駒台。後手は左上（盤の上端に揃える）、先手は右下（盤の下端に揃える） */
+.stand { display: flex; flex-direction: column; gap: 6px; width: calc(var(--sq) * 2.3); }
+.stand.gote { align-self: start; margin-top: calc(var(--sq) * 0.5); }
+.stand.sente { align-self: end; }
+.stand-pieces {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  padding: calc(var(--sq) * 0.08);
+  background-color: var(--stand);
+  background-image:
+    repeating-linear-gradient(90deg, #00000009 0 1px, #0000 1px 5px),
+    repeating-linear-gradient(90deg, #ffffff0a 0 1px, #0000 1px 8px),
+    repeating-linear-gradient(90deg, #00000005 0 2px, #0000 2px 13px);
+  border: 3px solid var(--stand-edge);
+  border-radius: 2px;
+  box-shadow: var(--shadow);
+}
+.slot {
+  position: relative; display: block;
+  width: 100%; aspect-ratio: 1 / 1.09;
+  padding: 0; border: 0; border-radius: 2px; background: transparent;
+}
+/* 玉が無いとき（本将棋）は歩を2列ぶん使う。先手は最後、後手は最初 */
+.stand-pieces:not(.with-king) .slot[data-role='pawn'] { grid-column: span 2; }
+.stand-pieces:not(.with-king) .slot[data-role='pawn'] .piece { inset: 4% 27% 3% 27%; }
+.slot:hover { background: transparent; }
+.slot:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); }
+.slot.selected, .slot.selected:hover { background: var(--selected); }
+.slot:disabled { cursor: default; opacity: 1; }
+.slot.dim, .slot.dim:disabled { opacity: 0.12; }
+.slot.faded, .slot.faded:disabled { opacity: 0.3; }
+.slot .count {
+  position: absolute; right: 2px; bottom: 0;
+  font-size: calc(var(--sq) * 0.24); line-height: 1.3; font-weight: 600;
+  padding: 0 4px; color: #fff; background: rgba(0, 0, 0, 0.62); border-radius: 3px;
+}
+.plate {
+  display: flex; align-items: center; gap: 0.4em;
+  padding: 0.25em 0.6em;
+  font-size: calc(var(--sq) * 0.3);
+  background: var(--panel); border: 1px solid var(--rule-strong);
+  color: var(--ink);
+}
+.plate-mark { font-size: 0.95em; }
+.plate-name { flex: 1; }
+.plate-turn { font-size: 0.72em; padding: 0 0.5em; background: var(--ink); color: var(--bg); border-radius: 2px; }
+.plate.to-move { border-color: var(--ink); }
 
 /* 天秤グラフ */
 .graph { height: 150px; background: var(--panel); border: 1px solid var(--rule); }
 .tenbin { width: 100%; height: 100%; display: block; }
 .tenbin .post, .tenbin .arm, .tenbin .pan line { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
-.tenbin .arm { stroke-width: 2.5; transition: transform 300ms ease; }
+.tenbin .arm { stroke-width: 2.5; }
 .tenbin .beam > g { transition: transform 300ms ease; }
 .tenbin .pan.sente rect { fill: var(--sente); }
 .tenbin .pan.gote rect { fill: none; stroke: var(--gote); stroke-width: 2; }
@@ -247,47 +326,55 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .tenbin .line { fill: none; stroke: var(--ink); stroke-width: 1.5; }
 .tenbin .pt { fill: var(--sente); }
 .tenbin .cursor { stroke: var(--gote); stroke-width: 1.5; }
-@media (prefers-reduced-motion: reduce) { .tenbin .arm, .tenbin .beam > g { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tenbin .beam > g { transition: none; } }
 
 /* 右列 */
 .side-head { padding: 10px 12px; }
-.game-title { font-family: var(--font-piece); font-size: 16px; letter-spacing: 0.06em; }
+.game-title { font-family: var(--font-serif); font-size: 17px; letter-spacing: 0.08em; }
 .choose p { margin: 6px 0 8px; color: var(--ink-2); }
 .choose button { margin-right: 6px; }
-.chosen { color: var(--ink-2); margin-top: 2px; }
+.chosen, .branch { color: var(--ink-2); margin-top: 4px; }
 
 .kifu { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.kifu-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--rule); }
 .kifu-title, .analysis-title { font-weight: 600; }
-.kifu-title { padding: 8px 12px; border-bottom: 1px solid var(--rule); }
-.kifu-list { margin: 0; padding: 4px 0; list-style: none; overflow: auto; }
-.kifu-phase { padding: 6px 12px 2px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--rule); }
-.kifu-phase:first-child { border-top: 0; }
-.kifu-move { display: grid; grid-template-columns: 34px 1fr; padding: 2px 12px; }
-.kifu-move .n { color: var(--ink-3); text-align: right; padding-right: 8px; }
-.kifu-move:last-child { background: var(--panel-2); }
-.kifu-empty { padding: 10px 12px; color: var(--ink-2); }
-.kifu-footer { padding: 6px 12px; border-top: 1px solid var(--rule); color: var(--ink-2); }
+.kifu-nav { display: flex; gap: 2px; }
+.kifu-nav button { padding: 4px 6px; }
+.kifu-nav svg { width: 16px; height: 16px; }
+.kifu-list { margin: 0; padding: 4px 0; list-style: none; overflow: auto; font-size: 15px; }
+.kifu-phase { padding: 8px 12px 2px; font-size: 12px; color: var(--ink-3); }
+.kifu-move { display: grid; grid-template-columns: 36px 1fr; padding: 3px 12px; cursor: pointer; }
+.kifu-move:hover { background: var(--panel-2); }
+.kifu-move .n { color: var(--ink-3); text-align: right; padding-right: 10px; font-size: 13px; }
+.kifu-move .t { font-family: var(--font-serif); letter-spacing: 0.02em; }
+.kifu-move .mk { margin-right: 0.15em; }
+.kifu-move.choose .t, .kifu-move.start .t { font-family: var(--font-ui); color: var(--ink-2); }
+.kifu-move.current { background: var(--ink); color: var(--bg); }
+.kifu-move.current .n, .kifu-move.current .t { color: var(--bg); }
+.kifu-foot { padding: 6px 12px; border-top: 1px solid var(--rule); color: var(--ink-2); font-size: 12px; }
+.kifu-foot[hidden] { display: none; }
 
 .analysis { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
 .analysis-head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
 .analysis-head select { flex: 1; min-width: 0; }
-.analysis-status { padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
+.analysis-status { display: flex; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
 .analysis-notice { padding: 6px 12px; color: var(--ink-2); background: var(--panel-2); }
 .analysis-notice .link { margin-left: 4px; }
 .analysis-table { overflow: auto; }
 .analysis-empty { padding: 12px; color: var(--ink-2); }
 .analysis-table table { width: 100%; border-collapse: collapse; }
 .analysis-table th { font-weight: 500; font-size: 12px; color: var(--ink-3); text-align: left; padding: 4px 8px; position: sticky; top: 0; background: var(--panel); }
-.analysis-table td { padding: 5px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
-.analysis-table td.move { white-space: nowrap; font-weight: 600; }
+.analysis-table td { padding: 6px 8px; border-top: 1px solid var(--rule); vertical-align: top; }
+.analysis-table .rank { width: 2.4em; text-align: right; color: var(--ink-3); }
+.analysis-table td.move { white-space: nowrap; font-family: var(--font-serif); font-size: 15px; }
 .analysis-table td.p { white-space: nowrap; }
-.analysis-table td.cp, .analysis-table td.depth { text-align: right; color: var(--ink-2); white-space: nowrap; }
-.analysis-table td.pv { color: var(--ink-2); font-size: 12px; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.analysis-table td.cp { text-align: right; color: var(--ink-2); white-space: nowrap; }
+.analysis-table td.pv { color: var(--ink-2); font-size: 12px; font-family: var(--font-serif); line-height: 1.6; user-select: text; -webkit-user-select: text; }
 .bar { display: inline-block; width: 56px; height: 8px; vertical-align: middle; margin-right: 6px; border: 1px solid var(--gote); background: transparent; }
 .bar i { display: block; height: 100%; width: var(--p); background: var(--sente); }
 
 /* 状態行と USI ログ */
-.status { padding: 6px 12px; background: var(--panel); border-top: 1px solid var(--rule); color: var(--ink-2); }
+.status { padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--rule); color: var(--ink-2); }
 .status.error { color: var(--sente); }
 .console { display: grid; grid-template-rows: auto 180px auto; background: var(--panel); border-top: 1px solid var(--rule); }
 .console[hidden] { display: none; }
@@ -300,7 +387,7 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .console-form input { flex: 1; }
 
 /* エンジンのダイアログ */
-.engine-dialog { width: min(680px, 92vw); border: 1px solid var(--rule-strong); border-radius: 0; padding: 0; background: var(--panel); color: var(--ink); }
+.engine-dialog { width: min(680px, 92vw); border: 1px solid var(--rule-strong); border-radius: 0; padding: 0; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
 .engine-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
 .dialog-body { padding: 16px 20px; display: grid; gap: 12px; }
 .dialog-head { display: flex; justify-content: space-between; align-items: baseline; }
@@ -314,6 +401,7 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .engine-actions { display: flex; gap: 6px; margin-top: 4px; }
 .engine-empty { color: var(--ink-2); }
 .engine-form label { display: grid; gap: 4px; }
+.engine-form code { font-size: 12px; color: var(--ink-2); }
 .path-row { display: flex; gap: 6px; }
 .path-row input { flex: 1; min-width: 0; }
 .form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }

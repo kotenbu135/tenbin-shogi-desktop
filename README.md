@@ -12,7 +12,7 @@
 ## いま動くもの（v0）
 
 - 天秤将棋の手順（両玉 → 先後の選択 → 布石 38 手 → 本将棋）と布石将棋。ルールは wasm（cppshogi）が持つ
-- 盤・駒台・棋譜・待った・投了、41 手目の裁定
+- 盤・駒台・名札・棋譜（連盟の符号、局面の移動、分岐）・待った・投了、41 手目の裁定。駒は公開版と同じ kanji_light
 - USI エンジンの登録（実行ファイル・EvalDir・スレッド・ハッシュ・MultiPV・追加 setoption）
 - 検討: 現局面を `position` で渡して `go infinite`、MultiPV を候補表に。勝率は 41 手目の較正式で換算
 - 天秤グラフ（先手勝率の折れ線と、現局面で傾く梁）
@@ -52,8 +52,10 @@ npm run tauri build      # 配布物
 ### WSL / Ubuntu で `tauri dev` するには
 
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev fonts-noto-cjk
 ```
+
+`fonts-noto-cjk` は日本語の書体。無いと符号や駒台の文字が代替フォントで崩れる。
 
 ### Windows で使うには
 

@@ -1,4 +1,4 @@
-// 検討パネル。エンジンを1本選び、現局面を渡して MultiPV の読み筋を表にする。
+// 検討パネル。エンジンを1本選び、表示中の局面を渡して MultiPV の読み筋を表にする。
 // 評価はここで「先手の勝率」に直してから外へ渡す（グラフと同じ目盛り）。
 
 import { UsiEngine, type EngineConfig, type EngineState } from '../usi/engine.ts';
@@ -14,21 +14,24 @@ export interface AnalysisLine {
   cp: number | null;
   mate: number | null;
   depth: number | null;
+  seldepth: number | null;
   nodes: number | null;
   nps: number | null;
+  time: number | null;
   pv: string[];
 }
 
 export interface AnalysisDeps {
   settings(): Settings;
-  onEvaluation(pSente: number, lines: AnalysisLine[]): void;
+  /** ply: 評価した局面の手数（その局面までに指された手数） */
+  onEvaluation(ply: number, pSente: number, lines: AnalysisLine[]): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
   openEngineSettings(): void;
-  /** 読み筋の先頭手を日本語にする */
-  moveText(usi: string, color: Color): string;
+  /** 読み筋（USI）を符号の列にする */
+  pvText(usis: string[]): string[];
 }
 
-interface Target {
+export interface Target {
   positionCmd: string;
   phase: Phase;
   turn: Color;
@@ -43,6 +46,7 @@ export class AnalysisPanel {
   private readonly select: HTMLSelectElement;
   private readonly toggle: HTMLButtonElement;
   private readonly status: HTMLElement;
+  private readonly stats: HTMLElement;
   private readonly table: HTMLElement;
   private readonly notice: HTMLElement;
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,12 +58,13 @@ export class AnalysisPanel {
         <select class="engine-select" aria-label="検討に使うエンジン"></select>
         <button type="button" class="primary" data-act="toggle">検討を始める</button>
       </div>
-      <div class="analysis-status"></div>
+      <div class="analysis-status"><span class="engine-name"></span><span class="engine-stats"></span></div>
       <div class="analysis-notice" hidden></div>
       <div class="analysis-table"></div>`;
     this.select = root.querySelector('.engine-select')!;
     this.toggle = root.querySelector('[data-act="toggle"]')!;
-    this.status = root.querySelector('.analysis-status')!;
+    this.status = root.querySelector('.engine-name')!;
+    this.stats = root.querySelector('.engine-stats')!;
     this.table = root.querySelector('.analysis-table')!;
     this.notice = root.querySelector('.analysis-notice')!;
     this.select.addEventListener('change', () => {
@@ -70,6 +75,10 @@ export class AnalysisPanel {
       else void this.start();
     });
     this.refreshEngineList();
+  }
+
+  get isRunning(): boolean {
+    return this.running;
   }
 
   refreshEngineList(): void {
@@ -91,7 +100,7 @@ export class AnalysisPanel {
       b.className = 'link';
       b.textContent = 'エンジンを登録する';
       b.addEventListener('click', () => this.deps.openEngineSettings());
-      this.notice.append('検討にはUSIエンジンが要ります。', b);
+      this.notice.append('検討には USI エンジンが要ります。', b);
       return;
     }
     this.select.disabled = false;
@@ -120,10 +129,11 @@ export class AnalysisPanel {
     this.paintState();
   }
 
-  /** 局面が変わったら呼ぶ。検討中なら新しい局面で続ける。 */
+  /** 表示中の局面が変わったら呼ぶ。検討中なら新しい局面で続ける。 */
   async setTarget(t: Target): Promise<void> {
+    const same = this.target?.positionCmd === t.positionCmd;
     this.target = t;
-    if (this.running) await this.restart();
+    if (this.running && !same) await this.restart();
     else this.paintState();
   }
 
@@ -180,6 +190,7 @@ export class AnalysisPanel {
       this.paintState();
       return;
     }
+    this.notice.hidden = true;
     this.lines.clear();
     this.paintTable();
     await this.engine.goInfinite(this.target.positionCmd, (info) => this.onInfo(info));
@@ -237,11 +248,13 @@ export class AnalysisPanel {
       cp,
       mate,
       depth: info.depth ?? null,
+      seldepth: info.seldepth ?? null,
       nodes: info.nodes ?? null,
       nps: info.nps ?? null,
+      time: info.time ?? null,
       pv: info.pv ?? [],
     });
-    if (mpv === 1) this.deps.onEvaluation(pSente, this.sortedLines());
+    if (mpv === 1) this.deps.onEvaluation(t.ply, pSente, this.sortedLines());
     // info は秒に数十回来る。描画は間引く。
     if (!this.renderTimer) {
       this.renderTimer = setTimeout(() => {
@@ -260,18 +273,23 @@ export class AnalysisPanel {
     this.toggle.textContent = this.running ? '検討を止める' : '検討を始める';
     this.toggle.classList.toggle('primary', !this.running);
     const name = this.engine?.idName || this.currentConfig()?.name || '';
-    const label: Record<EngineState, string> = {
-      stopped: '停止',
-      starting: '起動中',
-      ready: '待機',
-      thinking: '思考中',
-    };
+    const label: Record<EngineState, string> = { stopped: '停止', starting: '起動中', ready: '待機', thinking: '思考中' };
     this.status.textContent = name ? `${name} · ${label[st]}` : '';
+    if (!this.running) this.stats.textContent = '';
   }
 
   private paintTable(): void {
     const t = this.target;
     const lines = this.sortedLines();
+    const top = lines[0];
+    if (top) {
+      const parts: string[] = [];
+      if (top.depth !== null) parts.push(`深さ ${top.depth}${top.seldepth !== null ? '/' + top.seldepth : ''}`);
+      if (top.nodes !== null) parts.push(`${top.nodes.toLocaleString('ja-JP')} ノード`);
+      if (top.nps !== null) parts.push(`${top.nps.toLocaleString('ja-JP')} NPS`);
+      if (top.time !== null) parts.push(`${(top.time / 1000).toFixed(1)} 秒`);
+      this.stats.textContent = parts.join(' · ');
+    }
     if (!t || lines.length === 0) {
       this.table.innerHTML = this.running
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
@@ -279,20 +297,22 @@ export class AnalysisPanel {
       return;
     }
     const tbl = document.createElement('table');
-    tbl.innerHTML = `<thead><tr><th>候補</th><th>先手勝率</th><th>評価</th><th>深さ</th><th>読み筋</th></tr></thead>`;
+    tbl.innerHTML = `<thead><tr><th class="rank">順位</th><th>候補</th><th>先手勝率</th><th class="cp">評価値</th><th>読み筋</th></tr></thead>`;
     const body = document.createElement('tbody');
     for (const l of lines) {
       const tr = document.createElement('tr');
-      const first = l.pv[0];
-      const move = first ? this.deps.moveText(first, t.turn) : '—';
-      const evalText = l.mate !== null ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate)}詰` : l.cp !== null ? (l.cp > 0 ? `+${l.cp}` : String(l.cp)) : '';
+      const pv = this.deps.pvText(l.pv);
+      const move = pv[0] ?? '—';
+      const evalText = l.mate !== null
+        ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
+        : l.cp !== null ? (l.cp > 0 ? `+${l.cp}` : String(l.cp)) : '';
       const pct = (l.pSente * 100).toFixed(1);
       tr.innerHTML = `
+        <td class="rank">${l.multipv}</td>
         <td class="move">${escapeHtml(move)}</td>
         <td class="p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></td>
         <td class="cp">${escapeHtml(evalText)}</td>
-        <td class="depth">${l.depth ?? ''}</td>
-        <td class="pv">${escapeHtml(l.pv.slice(0, 12).join(' '))}</td>`;
+        <td class="pv">${escapeHtml(pv.slice(1, 14).join(' '))}</td>`;
       body.appendChild(tr);
     }
     tbl.appendChild(body);
