@@ -1,0 +1,11 @@
+[package]
+name = "usi-host"
+version = "0.1.0"
+description = "USIエンジンの子プロセスを起動し、標準入出力を行単位で仲介する（Tauri非依存）"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]

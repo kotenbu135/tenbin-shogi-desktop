@@ -1,0 +1,23 @@
+[package]
+name = "tenbin-shogi"
+version = "0.1.0"
+description = "天秤将棋のデスクトップGUI（対局・検討）"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "tenbin_shogi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-store = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+usi-host = { path = "../crates/usi-host" }

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/usi-host", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/kotenbu135/tenbin-shogi-desktop"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

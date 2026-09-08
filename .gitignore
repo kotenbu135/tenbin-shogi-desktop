@@ -1,0 +1,8 @@
+node_modules/
+dist/
+target/
+src-tauri/gen/schemas/
+*.log
+.DS_Store
+# 各自が用意するもの（同梱しない）
+engines/
