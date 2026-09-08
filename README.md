@@ -6,6 +6,7 @@
 - 設計の検討: [docs/plan-desktop-gui.md](docs/plan-desktop-gui.md)
 - 布石 USI 拡張: [docs/usi-fuseki-extension.md](docs/usi-fuseki-extension.md)
 - 画面の設計: [docs/design.md](docs/design.md)
+- モデルの配布: [docs/plan-model-distribution.md](docs/plan-model-distribution.md)
 
 エンジンと評価関数は**同梱しない**。各自で用意し、「エンジン」から場所を指定する。
 

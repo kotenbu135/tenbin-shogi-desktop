@@ -26,6 +26,6 @@ CSS で回してはいけない。玉将（GY）は先手、王将（OU）は後
 
 | もの | ライセンス | 用途 |
 |---|---|---|
-| shogiops | MIT | 本将棋の合法手・SFEN・日本語の符号 |
+| shogiops | GPL-3.0-or-later | 本将棋の合法手・SFEN・日本語の符号。GPL-3.0-only のこのアプリに同梱できる |
 | Tauri と各プラグイン | MIT / Apache-2.0 | デスクトップの殻 |
 | Vite / TypeScript | MIT / Apache-2.0 | ビルド |
