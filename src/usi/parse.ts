@@ -149,6 +149,9 @@ export function parseId(line: string): { name?: string; author?: string } | null
 /**
  * 評価値（手番側 cp）→ 手番側の勝率。
  * 既定の S=435, offset=+34cp は 41 手目局面 4,765 局の実測較正（開発リポジトリ yaneuraou_scorer.py）。
+ * 2026-09-08 に iter1177 の 5,569 局の実際の勝敗で再確認した（logloss 0.4967。最良の S=460/+70cp と 0.0006 差）。
+ * 採点器の既定 S=600/0 はいちばん悪い。data/cp_ply41.npz の win 列は σ(cp/600) であって勝敗ではないので、
+ * それで較正すると必ず S=600 が出る。勝敗はアリーナ JSON の games[].result から取る。
  */
 export function cpToWinrate(cp: number, scale = 435, offsetCp = 34): number {
   return 1 / (1 + Math.exp(-(cp - offsetCp) / scale));

@@ -282,7 +282,14 @@ export class AnalysisPanel {
     const t = this.target;
     const lines = this.sortedLines();
     const top = lines[0];
-    if (top) {
+    if (top && t && t.phase !== 'normal') {
+      // 布石中の数字は価値ネットの推定。深さやノード数に意味は無いので、代わりに当てにできる度合いを出す。
+      // held-out の AUC は 1〜17 手目で 0.62〜0.65、18 手目から 0.69、30 手目以降で 0.76〜0.78（iter1400 以降）。
+      // 両玉（天秤将棋の 1〜2 手目）は実対局の勝率を引いた表なので、価値ネットより確か。
+      const ply = t.ply;
+      const trust = ply < 18 ? '序盤の数字は当てにならない' : ply < 30 ? '中盤の数字は目安' : '終盤の数字はおおむね当たる';
+      this.stats.textContent = t.phase === 'kings' ? '両玉の価値表 · 実対局の勝率' : `布石の価値ネット · ${trust}`;
+    } else if (top) {
       const parts: string[] = [];
       if (top.depth !== null) parts.push(`深さ ${top.depth}${top.seldepth !== null ? '/' + top.seldepth : ''}`);
       if (top.nodes !== null) parts.push(`${top.nodes.toLocaleString('ja-JP')} ノード`);
