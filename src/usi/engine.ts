@@ -6,7 +6,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { parseBestmove, parseId, parseInfo, parseOption, type UsiInfo, type UsiOption } from './parse.ts';
+import { parseBestmove, parseId, parseInfo, parseOption, type Bestmove, type UsiInfo, type UsiOption } from './parse.ts';
+import { DEFAULT_EVAL, type EvalScale } from './evalscale.ts';
 
 export type EngineKind = 'normal' | 'fuseki';
 
@@ -19,15 +20,19 @@ export interface EngineConfig {
   args?: string;
   /** 省略時は実行ファイルのフォルダ */
   cwd?: string;
-  /** やねうら王の EvalDir。各自が用意する（同梱しない） */
-  evalDir?: string;
-  threads: number;
-  hashMb: number;
-  multiPv: number;
   /** normal: 41手目以降だけ。fuseki: 布石 USI 拡張（position fuseki）を受ける */
   kind: EngineKind;
-  /** 追加の setoption。name → value */
+  /**
+   * setoption の上書き。name → value。Threads・USI_Hash・MultiPV・EvalDir も普通の項目としてここに入る。
+   * エンジンが申告した既定値と同じものは持たない。
+   */
   options: Record<string, string>;
+  /** 登録時に `usi` で読んだ申告。設定画面を組み立てるのに使う */
+  declared?: UsiOption[];
+  idName?: string;
+  idAuthor?: string;
+  /** cp → 勝率の目盛り（エンジンごと） */
+  eval: EvalScale;
 }
 
 export function newEngineConfig(): EngineConfig {
@@ -35,12 +40,18 @@ export function newEngineConfig(): EngineConfig {
     id: 'e' + Math.random().toString(36).slice(2, 10),
     name: '',
     path: '',
-    threads: 4,
-    hashMb: 256,
-    multiPv: 3,
     kind: 'normal',
     options: {},
+    eval: { ...DEFAULT_EVAL },
   };
+}
+
+/** よく触る項目は先頭に出す。残りは申告順 */
+export const COMMON_OPTIONS = ['Threads', 'USI_Hash', 'MultiPV', 'EvalDir', 'BookFile', 'USI_OwnBook', 'FV_SCALE', 'NetworkDelay', 'NetworkDelay2'];
+
+export function optionValue(cfg: EngineConfig, name: string): string | undefined {
+  if (cfg.options[name] !== undefined) return cfg.options[name];
+  return cfg.declared?.find((o) => o.name === name)?.default;
 }
 
 interface EnginePayload {
@@ -76,17 +87,47 @@ interface Waiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export class UsiEngine {
+/**
+ * 検討・対局が相手にする「思考するもの」。USI のプロセスも、内蔵の布石評価も、この形で見える。
+ */
+export interface Thinker {
+  readonly config: EngineConfig;
+  state: EngineState;
+  idName: string;
+  onLog: ((dir: LogDirection, text: string) => void) | null;
+  onStateChange: ((s: EngineState) => void) | null;
+  start(): Promise<void>;
+  /** `position …` を渡して考えさせる。info は onInfo へ。止めるのは stop() */
+  goInfinite(positionCmd: string, onInfo: (info: UsiInfo) => void): Promise<void>;
+  /** 1手指す。goArgs は "btime 60000 wtime 60000 byoyomi 10000" や "movetime 3000" */
+  go(positionCmd: string, goArgs: string, onInfo?: (info: UsiInfo) => void): Promise<Bestmove>;
+  stop(): Promise<void>;
+  quit(): Promise<void>;
+  send(line: string): void;
+  newGame(): Promise<void>;
+  /** MultiPV など、走っていないときに送る 1 項目 */
+  setOption(name: string, value: string | number): void;
+  hasOption(name: string): boolean;
+}
+
+export class UsiEngine implements Thinker {
   state: EngineState = 'stopped';
   idName = '';
+  idAuthor = '';
   options: UsiOption[] = [];
   onLog: ((dir: LogDirection, text: string) => void) | null = null;
   onStateChange: ((s: EngineState) => void) | null = null;
   private waiters: Waiter[] = [];
   private onInfo: ((info: UsiInfo) => void) | null = null;
   private chain: Promise<unknown> = Promise.resolve();
+  /** プロセスの識別子。同じ登録を2本立てる（対局の先後）ときは別にする */
+  readonly processId: string;
+  readonly config: EngineConfig;
 
-  constructor(public readonly config: EngineConfig) {}
+  constructor(config: EngineConfig, processId?: string) {
+    this.config = config;
+    this.processId = processId ?? config.id;
+  }
 
   private setState(s: EngineState): void {
     this.state = s;
@@ -102,33 +143,11 @@ export class UsiEngine {
     if (!isTauri()) throw new Error('エンジンの起動は Tauri のアプリ内でだけできる（ブラウザのプレビューでは不可）');
     if (this.state !== 'stopped') return;
     this.setState('starting');
-    await ensureListener();
-    receivers.set(this.config.id, (p) => this.receive(p));
     try {
-      await invoke('engine_start', {
-        id: this.config.id,
-        path: this.config.path,
-        args: (this.config.args ?? '').split(/\s+/).filter(Boolean),
-        cwd: this.config.cwd || null,
-      });
-      this.log('sys', `起動: ${this.config.path}`);
-      this.options = [];
+      await this.spawn();
       this.send('usi');
       await this.waitFor((l) => l === 'usiok', 15000);
-      const c = this.config;
-      const known = new Set(this.options.map((o) => o.name));
-      const setIf = (name: string, value: string | number | undefined) => {
-        if (value === undefined || value === '') return;
-        if (!known.has(name)) return;
-        this.send(`setoption name ${name} value ${value}`);
-      };
-      setIf('USI_Hash', c.hashMb);
-      setIf('Threads', c.threads);
-      setIf('MultiPV', c.multiPv);
-      setIf('EvalDir', c.evalDir);
-      for (const [k, v] of Object.entries(c.options)) {
-        if (k) this.send(`setoption name ${k} value ${v}`);
-      }
+      this.applyOptions();
       this.send('isready');
       await this.waitFor((l) => l === 'readyok', 120000);
       this.setState('ready');
@@ -138,15 +157,49 @@ export class UsiEngine {
     }
   }
 
+  private async spawn(): Promise<void> {
+    await ensureListener();
+    receivers.set(this.processId, (p) => this.receive(p));
+    await invoke('engine_start', {
+      id: this.processId,
+      path: this.config.path,
+      args: (this.config.args ?? '').split(/\s+/).filter(Boolean),
+      cwd: this.config.cwd || null,
+    });
+    this.log('sys', `起動: ${this.config.path}`);
+    this.options = [];
+  }
+
+  /** 上書きの setoption を送る。申告に無い名前も送る（エンジンが読み捨てる） */
+  private applyOptions(): void {
+    const declared = new Map(this.options.map((o) => [o.name, o]));
+    for (const [k, v] of Object.entries(this.config.options)) {
+      if (!k) continue;
+      const d = declared.get(k);
+      if (d && d.default !== undefined && d.default === v) continue;
+      if (d?.type === 'button') continue;
+      this.send(`setoption name ${k} value ${v}`);
+    }
+  }
+
+  setOption(name: string, value: string | number): void {
+    if (this.state === 'stopped' || this.state === 'starting') return;
+    this.send(`setoption name ${name} value ${value}`);
+  }
+
+  hasOption(name: string): boolean {
+    return this.options.some((o) => o.name === name);
+  }
+
   private receive(p: EnginePayload): void {
     if (p.kind === 'exit') {
       this.log('sys', '終了した');
       this.failWaiters(new Error('エンジンが終了した'));
-      receivers.delete(this.config.id);
+      receivers.delete(this.processId);
       this.setState('stopped');
       return;
     }
-    const line = p.line ?? '';
+    const line = (p.line ?? '').replace(/\r$/, '');
     if (p.kind === 'stderr') {
       this.log('err', line);
       return;
@@ -154,6 +207,7 @@ export class UsiEngine {
     this.log('in', line);
     const id = parseId(line);
     if (id?.name) this.idName = id.name;
+    if (id?.author) this.idAuthor = id.author;
     const opt = parseOption(line);
     if (opt) this.options.push(opt);
     if (line.startsWith('info')) {
@@ -195,7 +249,13 @@ export class UsiEngine {
 
   send(line: string): void {
     this.log('out', line);
-    void invoke('engine_send', { id: this.config.id, line }).catch((e) => this.log('sys', String(e)));
+    void invoke('engine_send', { id: this.processId, line }).catch((e) => this.log('sys', String(e)));
+  }
+
+  async newGame(): Promise<void> {
+    if (this.state === 'stopped' || this.state === 'starting') return;
+    await this.stop();
+    this.send('usinewgame');
   }
 
   /**
@@ -211,11 +271,32 @@ export class UsiEngine {
     this.send('go infinite');
   }
 
+  /** 1手指させて bestmove を待つ。途中で stop() されたときも、そのとき返った bestmove で解決する。 */
+  async go(positionCmd: string, goArgs: string, onInfo?: (info: UsiInfo) => void): Promise<Bestmove> {
+    if (this.state === 'stopped' || this.state === 'starting') throw new Error('エンジンが準備できていない');
+    await this.stop();
+    this.onInfo = onInfo ?? null;
+    this.setState('thinking');
+    const p = this.waitFor((l) => l.startsWith('bestmove'), 3_600_000);
+    this.send(positionCmd);
+    this.send(`go ${goArgs}`.trim());
+    try {
+      const line = await p;
+      const bm = parseBestmove(line);
+      if (!bm) throw new Error(`bestmove を読めない: ${line}`);
+      return bm;
+    } finally {
+      this.onInfo = null;
+      if (this.state === 'thinking') this.setState('ready');
+    }
+  }
+
   /** 走っている探索を止め、bestmove を待つ。走っていなければ何もしない。 */
   async stop(): Promise<void> {
     if (this.state !== 'thinking') return;
     this.onInfo = null;
     const run = async () => {
+      if (this.state !== 'thinking') return;
       const p = this.waitFor((l) => l.startsWith('bestmove'), 10000);
       this.send('stop');
       try {
@@ -232,15 +313,34 @@ export class UsiEngine {
 
   async quit(): Promise<void> {
     this.onInfo = null;
-    receivers.delete(this.config.id);
+    receivers.delete(this.processId);
     this.failWaiters(new Error('エンジンを止めた'));
     if (isTauri()) {
       try {
-        await invoke('engine_stop', { id: this.config.id });
+        await invoke('engine_stop', { id: this.processId });
       } catch (e) {
         this.log('sys', String(e));
       }
     }
     this.setState('stopped');
+  }
+
+  /**
+   * 登録のための下見。起動して `usi` を送り、名前と申告を読んで止める。
+   * isready は送らない（評価関数の読み込みで長く待つエンジンがある）。
+   */
+  static async probe(cfg: Pick<EngineConfig, 'path' | 'args' | 'cwd'>, onLog?: (dir: LogDirection, text: string) => void): Promise<{ idName: string; idAuthor: string; options: UsiOption[] }> {
+    const tmp = new UsiEngine({ ...newEngineConfig(), ...cfg }, 'probe-' + Math.random().toString(36).slice(2, 8));
+    tmp.onLog = onLog ?? null;
+    tmp.setState('starting');
+    try {
+      await tmp.spawn();
+      tmp.send('usi');
+      await tmp.waitFor((l) => l === 'usiok', 15000);
+      return { idName: tmp.idName, idAuthor: tmp.idAuthor, options: tmp.options.slice() };
+    } finally {
+      tmp.send('quit');
+      await tmp.quit();
+    }
   }
 }

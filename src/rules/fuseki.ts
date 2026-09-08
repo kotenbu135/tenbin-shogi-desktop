@@ -145,4 +145,27 @@ export class Fuseki {
   verifyFinalSfen(sfen: string): boolean {
     return this.M.ccall('fw_verify_final_sfen', 'number', ['string'], [sfen]) === 1;
   }
+
+  /** 方策・価値ネットの入力（input1 62面 + input2 59面）。HEAP のビューではなくコピーを返す。 */
+  policyInputs(): { input1: Float32Array; input2: Float32Array } {
+    const M = this.M;
+    M.ccall('fw_make_features', null, [], []);
+    const p1 = M.ccall('fw_features1_ptr', 'number', [], []) >> 2;
+    const p2 = M.ccall('fw_features2_ptr', 'number', [], []) >> 2;
+    return {
+      input1: M.HEAPF32.slice(p1, p1 + FEATURE_PLANES.input1 * FEATURE_PLANES.squares),
+      input2: M.HEAPF32.slice(p2, p2 + FEATURE_PLANES.input2 * FEATURE_PLANES.squares),
+    };
+  }
+
+  /** 駒打ち (pt, sq) が布石専用ネットの 648 次元のどこに載るか。 */
+  compactLabel(pt: number, sq: number, color: FusekiColor): number {
+    return this.M.ccall('fw_compact_label', 'number', ['number', 'number', 'number'], [pt, sq, color]);
+  }
+
+  /** USI の駒打ち（例 K*5i）を (pt, sq) に。読めなければ null */
+  parseUsi(usi: string): { pt: number; sq: number } | null {
+    for (const d of this.legalDrops()) if (d.usi === usi) return { pt: d.pt, sq: d.sq };
+    return null;
+  }
 }

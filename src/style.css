@@ -477,3 +477,55 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .save-choice { display: grid; gap: 2px; text-align: left; padding: 10px 14px; }
 .save-choice span { color: var(--ink-2); font-size: 12px; }
 .form-hint { align-self: end; padding-bottom: 6px; }
+
+/* ---- 検討の枠（複数エンジン） ---- */
+.analysis { grid-template-rows: auto auto minmax(0, 1fr); }
+.analysis-head .multipv { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.analysis-head .multipv input { width: 3.2em; }
+.analysis-head .link { white-space: nowrap; }
+.slots { overflow: auto; display: grid; align-content: start; }
+.analysis-slot { border-bottom: 2px solid var(--rule-strong); }
+.analysis-slot:last-child { border-bottom: 0; }
+.aslot-head { display: flex; gap: 6px; align-items: center; padding: 6px 12px 0; }
+.aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
+.aslot-remove { color: var(--ink-3); }
+.slots .analysis-table { overflow: visible; }
+.thinking { padding: 4px 12px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--rule); font-family: var(--font-serif); }
+.thinking[hidden] { display: none; }
+
+/* ---- エンジンの登録（申告から作る設定画面） ---- */
+.engine-default { font-size: 11px; padding: 1px 6px; margin-left: 6px; border: 1px solid var(--ink); border-radius: 2px; font-weight: 400; }
+.engine-idname { font-weight: 400; font-size: 12px; color: var(--ink-3); margin-left: 8px; }
+.engine-form .form-row.two { grid-template-columns: 1fr 1fr; }
+fieldset.kind.inline { display: flex; gap: 12px; align-items: center; }
+fieldset.eval-scale, fieldset.usi-options { border: 1px solid var(--rule); padding: 8px 12px; display: grid; gap: 8px; }
+fieldset.eval-scale legend, fieldset.usi-options legend { color: var(--ink-2); padding: 0 4px; }
+.engine-advanced summary { cursor: pointer; color: var(--ink-2); }
+.engine-advanced { display: grid; gap: 8px; }
+.option-grid { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding-right: 4px; }
+.opt-row { display: grid; grid-template-columns: 11em minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 2px 0; }
+.opt-row.changed .opt-name { font-weight: 600; }
+.opt-name { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-control { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.opt-control input[type="number"] { width: 7em; }
+.opt-control input[type="text"] { flex: 1; min-width: 0; }
+.opt-control .path-row { flex: 1; }
+.opt-range { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.opt-reset { font-size: 12px; color: var(--ink-3); }
+.import-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 50vh; overflow: auto; }
+.import-list label { display: flex; gap: 8px; align-items: baseline; }
+.import-name { font-weight: 600; }
+.engine-dialog { width: min(760px, 94vw); max-height: 92vh; overflow: auto; }
+
+/* ---- 新しい対局（席） ---- */
+.newgame-dialog { width: min(720px, 94vw); max-height: 92vh; overflow: auto; }
+.seats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+fieldset.seat { border: 1px solid var(--rule); padding: 8px 12px; display: grid; gap: 6px; min-width: 0; }
+fieldset.seat legend { color: var(--ink-2); padding: 0 4px; }
+.seat-type { display: flex; gap: 12px; }
+.seat-type label { display: flex; gap: 4px; align-items: center; }
+.seat-engine { display: grid; gap: 6px; }
+.seat-engine[hidden] { display: none; }
+.seat-engine label { display: grid; gap: 2px; }
+.seat-engine select { min-width: 0; max-width: 100%; }
+.newgame-form .form-row.two { grid-template-columns: 1fr 1fr; }

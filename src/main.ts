@@ -5,16 +5,19 @@ import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
 import { Game, rebuild, squareText, colorName, type Mode, type ViewState, type Color } from './state/game.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
-import { loadSettings, saveSettings, type Settings } from './settings.ts';
+import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint } from './ui/graph.ts';
 import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel } from './ui/analysis.ts';
 import { UsiConsole } from './ui/console.ts';
 import { EngineDialog } from './ui/engines.ts';
-import { NewGameDialog } from './ui/newgame.ts';
+import { NewGameDialog, type NewGameChoice } from './ui/newgame.ts';
 import { PositionEditor } from './ui/editor.ts';
-import { isTauri } from './usi/engine.ts';
+import { MatchDriver } from './ui/play.ts';
+import { UsiEngine, isTauri, type Thinker } from './usi/engine.ts';
+import { BuiltinEvaluator } from './eval/builtin.ts';
+import type { UsiInfo } from './usi/parse.ts';
 import { parseKif, writeKif, writeNormalOnlyKif } from './kif/tenbin-kif.ts';
 import type { Role as OpsRole } from 'shogiops/types';
 
@@ -27,12 +30,26 @@ interface Meta {
   startedAt: Date;
 }
 
+/** 内蔵の布石評価を読む。失敗しても対局は続く（布石の検討と AI の布石だけ使えない） */
+async function loadBuiltin(log: (text: string) => void): Promise<BuiltinEvaluator | null> {
+  try {
+    const base = new URL('/', location.href).href;
+    const b = await BuiltinEvaluator.load(base + 'models/', base + 'wasm/fuseki.mjs', base + 'vendor/ort/');
+    log(`内蔵の布石評価: 方策 ${b.manifest.policy.file} / 価値ネット ${b.manifest.value.file}${b.kings ? ' / 両玉の価値表' : ''}`);
+    return b;
+  } catch (e) {
+    log(`内蔵の布石評価を読めない: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   const settings: Settings = await loadSettings();
   applyTheme(settings.theme);
 
   const fuseki = await Fuseki.load(new URL('/wasm/fuseki.mjs', location.href).href);
   let game = new Game(fuseki, 'tenbin');
+  let builtin: BuiltinEvaluator | null = null;
   let meta: Meta = { sente: '', gote: '', timeControl: null, startedAt: new Date() };
   let clock = new Clock(null);
   /** 表示している局面。null は最新。数値は「何手目まで」 */
@@ -51,11 +68,25 @@ async function main(): Promise<void> {
     settings: () => settings,
     save: () => saveSettings(settings),
     onChanged: () => analysis.refreshEngineList(),
+    onLog: (_name, dir, text) => usiConsole.append(dir, text),
   });
-  const newGameDialog = new NewGameDialog($('dialogs'));
+  const newGameDialog = new NewGameDialog($('dialogs'), () => settings);
+
+  /** id（'builtin' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
+  function createThinker(id: string, processTag: string): Thinker | null {
+    if (id === BUILTIN_ID) {
+      if (builtin) builtin.method = settings.builtinMethod;
+      return builtin;
+    }
+    const cfg = settings.engines.find((e) => e.id === id);
+    if (!cfg) return null;
+    return new UsiEngine(cfg, `${cfg.id}-${processTag}`);
+  }
 
   const analysis = new AnalysisPanel($('analysis'), {
     settings: () => settings,
+    save: () => saveSettings(settings),
+    createThinker,
     onEvaluation: (ply, pSente, lines) => {
       evals.set(ply, { ply, p: pSente });
       paintGraph(pSente);
@@ -74,6 +105,18 @@ async function main(): Promise<void> {
     pvText: (usis) => viewGame().japanesePv(usis),
   });
   usiConsole.onSend = (line) => analysis.sendRaw(line);
+
+  const driver = new MatchDriver({
+    game: () => game,
+    clock: () => clock,
+    live: () => cursor === null && !editor,
+    apply: (token) => tryApply(token),
+    builtin: () => builtin,
+    createThinker,
+    say: (text, error) => say(text, error),
+    onLog: (_name, dir, text) => usiConsole.append(dir, text),
+    onThinking: (color, info) => paintThinking(color, info),
+  });
 
   const graph = new TenbinGraph(graphEl);
   const kifu = new KifuList($('kifu'), {
@@ -144,13 +187,32 @@ async function main(): Promise<void> {
         // 時間を計らない対局でも、指した時刻から経過秒だけは残せるが、ここでは残さない
       }
       paintAll();
+      driver.kick();
     } catch (e) {
       say(e instanceof Error ? e.message : String(e), true);
     }
   }
 
+  /** エンジンが考えている間、名札の下に読みを出す */
+  function paintThinking(color: Color, info: UsiInfo | null): void {
+    const el = $('thinking');
+    if (!info) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    const parts: string[] = [colorName(color) + 'が思考中'];
+    if (info.depth !== undefined) parts.push(`深さ ${info.depth}`);
+    if (info.scoreCp !== undefined) parts.push(`評価 ${info.scoreCp > 0 ? '+' : ''}${info.scoreCp}`);
+    if (info.scoreMate !== undefined) parts.push(`${info.scoreMate > 0 ? '' : '-'}${Math.abs(info.scoreMate)}手詰`);
+    if (info.pv?.length) parts.push(viewGame().japanesePv(info.pv).slice(0, 6).join(' '));
+    el.hidden = false;
+    el.textContent = parts.join(' · ');
+  }
+
   function startGame(mode: Mode, m: Partial<Meta> = {}, startSfen?: string): void {
     void analysis.stop();
+    void driver.abort();
     game = new Game(fuseki, mode, startSfen);
     meta = { sente: m.sente ?? '', gote: m.gote ?? '', timeControl: m.timeControl ?? null, startedAt: new Date() };
     attachClock(new Clock(meta.timeControl));
@@ -159,14 +221,17 @@ async function main(): Promise<void> {
     evals.clear();
     shapes = [];
     board.clearSelection();
+    paintThinking('sente', null);
     paintAll();
   }
 
   async function newGame(): Promise<void> {
     if (game.moves.length > 0 && game.phase !== 'over' && !confirm('いまの対局を捨てて新しく始めますか')) return;
-    const c = await newGameDialog.open();
+    const c: NewGameChoice | null = await newGameDialog.open();
     if (!c) return;
-    startGame(c.mode, { sente: c.sente, gote: c.gote, timeControl: c.timeControl });
+    startGame(c.mode, { timeControl: c.timeControl });
+    void driver.start(c);
+    paintAll();
   }
 
   /** 表示中の局面から指し直す（以降の手は消える） */
@@ -180,6 +245,7 @@ async function main(): Promise<void> {
     board.clearSelection();
     if (clock.enabled) clock.start(game.turn);
     paintAll();
+    driver.interrupt();
   }
 
   function undo(): void {
@@ -192,6 +258,7 @@ async function main(): Promise<void> {
     board.clearSelection();
     if (clock.enabled) clock.start(game.turn);
     paintAll();
+    driver.interrupt();
   }
 
   function say(text: string, error = false): void {
@@ -229,7 +296,17 @@ async function main(): Promise<void> {
   }
 
   function names(): Partial<Record<Color, string>> {
+    if (driver.active || (meta.sente === '' && meta.gote === '')) {
+      const n = driver.colorNames();
+      if (n.sente || n.gote) return { sente: n.sente || undefined, gote: n.gote || undefined };
+    }
     return { sente: meta.sente || undefined, gote: meta.gote || undefined };
+  }
+
+  /** KIF などに書く対局者名（席の名前を色へ写したもの） */
+  function kifMeta(): Meta {
+    const n = names();
+    return { ...meta, sente: n.sente ?? '', gote: n.gote ?? '' };
   }
 
   function paintBoard(): void {
@@ -318,6 +395,7 @@ async function main(): Promise<void> {
   function enterEditor(): void {
     if (editor) return;
     void analysis.stop();
+    void driver.abort();
     const v = currentView();
     editor = new PositionEditor(editorEl, {
       onChange: () => paintBoard(),
@@ -349,7 +427,7 @@ async function main(): Promise<void> {
 
   // ---- KIF ----
   async function saveKif(normalOnly: boolean): Promise<void> {
-    const text = normalOnly ? writeNormalOnlyKif(game, meta) : writeKif(game, meta);
+    const text = normalOnly ? writeNormalOnlyKif(game, kifMeta()) : writeKif(game, kifMeta());
     if (text === null) {
       say('本将棋がまだ始まっていないので、本将棋だけの棋譜は作れません', true);
       return;
@@ -389,6 +467,7 @@ async function main(): Promise<void> {
   function loadKifText(text: string): void {
     const k = parseKif(text);
     void analysis.stop();
+    void driver.abort();
     if (editor) exitEditor();
     game = rebuild(fuseki, k.mode, k.tokens, { startSfen: k.startSfen, times: k.times });
     meta = { sente: k.sente ?? '', gote: k.gote ?? '', timeControl: k.timeControl, startedAt: new Date() };
@@ -496,17 +575,31 @@ async function main(): Promise<void> {
 
   window.addEventListener('beforeunload', () => {
     void analysis.shutdown();
+    void driver.shutdown();
   });
 
   // 動作確認のスクリプト（scripts/*.mjs）から使う入口。利用者の操作には使わない
   (window as unknown as { tenbin: unknown }).tenbin = {
-    kif: (normalOnly = false) => (normalOnly ? writeNormalOnlyKif(game, meta) : writeKif(game, meta)),
+    kif: (normalOnly = false) => (normalOnly ? writeNormalOnlyKif(game, kifMeta()) : writeKif(game, kifMeta())),
     load: (text: string) => loadKifText(text),
     start: (mode: Mode, tc: TimeControl | null = null, sfen?: string) => startGame(mode, { timeControl: tc }, sfen),
+    play: (c: NewGameChoice) => {
+      startGame(c.mode, { timeControl: c.timeControl });
+      void driver.start(c);
+      paintAll();
+    },
     game: () => game,
+    builtin: () => builtin,
+    analysis,
+    settings,
+    probe: (cfg: { path: string; args?: string; cwd?: string }) => UsiEngine.probe(cfg, (dir, text) => usiConsole.append(dir, text)),
+    save: () => saveSettings(settings),
+    refresh: () => analysis.refreshEngineList(),
   };
 
   paintAll();
+  builtin = await loadBuiltin((t) => usiConsole.append('sys', t));
+  analysis.refreshEngineList();
   if (!isTauri()) {
     usiConsole.append('sys', 'ブラウザのプレビューです。盤と棋譜は動きますが、エンジンや棋譜のファイルは Tauri のアプリ内でだけ扱えます。');
   }

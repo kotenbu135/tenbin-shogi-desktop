@@ -2,18 +2,29 @@
 // ブラウザのプレビューでは localStorage に落とす。中身の形は同じ。
 
 import { isTauri, type EngineConfig } from './usi/engine.ts';
+import { DEFAULT_EVAL, type EvalScale } from './usi/evalscale.ts';
+import type { UsiOption } from './usi/parse.ts';
+
+/** 内蔵の布石評価を指す id。エンジンの一覧には出さず、布石の側の既定として使う */
+export const BUILTIN_ID = 'builtin';
 
 export interface Settings {
   engines: EngineConfig[];
   theme: 'system' | 'light' | 'dark';
-  /** 評価値→勝率の換算。既定は 41 手目局面の実測較正（S=435, +34cp） */
-  winrate: { scale: number; offsetCp: number };
-  /** 検討で使うエンジン id */
-  analysisEngineId?: string;
+  /** 41 手目以降の既定エンジン。未設定なら最初の本将棋エンジン */
+  normalEngineId?: string;
+  /** 布石の既定。内蔵か、布石対応のエンジン id */
+  fusekiEngineId: string;
+  /** 検討の候補数（MultiPV を持つエンジンに送る） */
+  analysisMultiPv: number;
+  /** 検討の枠に選んだエンジン（'auto' は局面で自動）。1 つ目が主 */
+  analysisSlots: string[];
+  /** 内蔵の布石評価の方式 */
+  builtinMethod: 'value' | 'twoply';
 }
 
 export function defaultSettings(): Settings {
-  return { engines: [], theme: 'system', winrate: { scale: 435, offsetCp: 34 } };
+  return { engines: [], theme: 'system', fusekiEngineId: BUILTIN_ID, analysisMultiPv: 3, analysisSlots: ['auto'], builtinMethod: 'value' };
 }
 
 const KEY = 'settings';
@@ -36,15 +47,53 @@ async function getStore(): Promise<StoreLike | null> {
   return store;
 }
 
-function merge(saved: Partial<Settings> | null | undefined): Settings {
+/** 以前の形（threads / hashMb / multiPv / evalDir と全体の winrate）を options と eval へ写す */
+export interface LegacyEngine extends Partial<EngineConfig> {
+  threads?: number;
+  hashMb?: number;
+  multiPv?: number;
+  evalDir?: string;
+}
+
+export function migrateEngine(raw: LegacyEngine, globalEval?: EvalScale): EngineConfig | null {
+  if (!raw || typeof raw.path !== 'string' || !raw.path) return null;
+  const options: Record<string, string> = { ...(raw.options ?? {}) };
+  if (raw.threads !== undefined && options.Threads === undefined) options.Threads = String(raw.threads);
+  if (raw.hashMb !== undefined && options.USI_Hash === undefined) options.USI_Hash = String(raw.hashMb);
+  if (raw.multiPv !== undefined && options.MultiPV === undefined) options.MultiPV = String(raw.multiPv);
+  if (raw.evalDir && options.EvalDir === undefined) options.EvalDir = raw.evalDir;
+  return {
+    id: raw.id ?? 'e' + Math.random().toString(36).slice(2, 10),
+    name: raw.name ?? '',
+    path: raw.path,
+    args: raw.args || undefined,
+    cwd: raw.cwd || undefined,
+    kind: raw.kind === 'fuseki' ? 'fuseki' : 'normal',
+    options,
+    declared: Array.isArray(raw.declared) ? (raw.declared as UsiOption[]) : undefined,
+    idName: raw.idName,
+    idAuthor: raw.idAuthor,
+    eval: raw.eval && typeof raw.eval.scale === 'number' ? { scale: raw.eval.scale, offsetCp: raw.eval.offsetCp ?? 0 } : { ...(globalEval ?? DEFAULT_EVAL) },
+  };
+}
+
+export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysisEngineId?: string }) | null | undefined): Settings {
   const d = defaultSettings();
   if (!saved) return d;
-  return {
+  const engines = Array.isArray(saved.engines) ? saved.engines.map((e) => migrateEngine(e as LegacyEngine, saved.winrate)).filter((e): e is EngineConfig => e !== null) : [];
+  const s: Settings = {
     ...d,
-    ...saved,
-    engines: Array.isArray(saved.engines) ? saved.engines : [],
-    winrate: { ...d.winrate, ...(saved.winrate ?? {}) },
+    theme: saved.theme ?? d.theme,
+    engines,
+    normalEngineId: saved.normalEngineId ?? saved.analysisEngineId,
+    fusekiEngineId: saved.fusekiEngineId ?? d.fusekiEngineId,
+    analysisMultiPv: saved.analysisMultiPv ?? d.analysisMultiPv,
+    analysisSlots: Array.isArray(saved.analysisSlots) && saved.analysisSlots.length ? saved.analysisSlots : d.analysisSlots,
+    builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
   };
+  if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
+  if (s.fusekiEngineId !== BUILTIN_ID && !engines.some((e) => e.id === s.fusekiEngineId)) s.fusekiEngineId = BUILTIN_ID;
+  return s;
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -70,4 +119,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
   } catch {
     // プレビュー環境で保存できなくても動作は続ける
   }
+}
+
+/** 41 手目以降の既定エンジン */
+export function normalEngine(s: Settings): EngineConfig | null {
+  return s.engines.find((e) => e.id === s.normalEngineId && e.kind === 'normal') ?? s.engines.find((e) => e.kind === 'normal') ?? null;
 }

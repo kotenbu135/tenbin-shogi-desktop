@@ -36,7 +36,7 @@ function hms(sec: number): string {
 }
 
 export class Clock {
-  private remainingMs: Record<Color, number>;
+  private remainingMs_: Record<Color, number>;
   private totalSec: Record<Color, number> = { sente: 0, gote: 0 };
   private running: Color | null = null;
   private startedAt = 0;
@@ -46,7 +46,7 @@ export class Clock {
 
   constructor(readonly control: TimeControl | null) {
     const m = (control?.mainSec ?? 0) * 1000;
-    this.remainingMs = { sente: m, gote: m };
+    this.remainingMs_ = { sente: m, gote: m };
   }
 
   get enabled(): boolean {
@@ -70,13 +70,13 @@ export class Clock {
     const c = this.running;
     if (!c || !this.control) return;
     const used = this.elapsedMs();
-    const main = this.remainingMs[c];
+    const main = this.remainingMs_[c];
     const over = used - main; // 持ち時間を超えたぶん
     if (over > 0 && over > this.control.byoyomiSec * 1000) {
       const loser = c;
       this.stopTimer();
       this.running = null;
-      this.remainingMs[c] = 0;
+      this.remainingMs_[c] = 0;
       this.onTimeout?.(loser);
       return;
     }
@@ -95,12 +95,18 @@ export class Clock {
     const elapsed = Math.floor(usedMs / 1000);
     if (this.control) {
       // 持ち時間から引く。秒読み中に指した分は持ち時間を減らさない（0 のまま）
-      this.remainingMs[c] = Math.max(0, this.remainingMs[c] - usedMs);
+      this.remainingMs_[c] = Math.max(0, this.remainingMs_[c] - usedMs);
     }
     this.totalSec[c] += elapsed;
     const t = { elapsed, total: this.totalSec[c] };
     this.start(next);
     return t;
+  }
+
+  /** 残りの持ち時間（ミリ秒）。エンジンへ渡す btime / wtime */
+  remainingMs(color: Color): number {
+    const running = this.running === color;
+    return Math.max(0, Math.round(this.remainingMs_[color] - (running ? this.elapsedMs() : 0)));
   }
 
   /** 対局が終わったら止める。 */
@@ -118,7 +124,7 @@ export class Clock {
     if (!this.enabled || !this.control) return null;
     const running = this.running === color;
     const used = running ? this.elapsedMs() : 0;
-    const mainLeft = this.remainingMs[color] - used;
+    const mainLeft = this.remainingMs_[color] - used;
     if (mainLeft > 0) {
       return { main: hms(mainLeft / 1000), byoyomi: null, inByoyomi: false, running };
     }

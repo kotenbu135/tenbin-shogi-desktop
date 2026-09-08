@@ -102,6 +102,102 @@ fn write_text_file(path: String, text: String) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("書けない: {path} ({e})"))
 }
 
+/// エンジンのフォルダ（アプリのデータフォルダの engines/）。無ければ作る。利用者はここにエンジンを置く。
+#[tauri::command]
+fn engines_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("データフォルダが分からない: {e}"))?
+        .join("engines");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("作れない: {} ({e})", dir.display()))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize)]
+struct FoundExecutable {
+    path: String,
+    name: String,
+}
+
+fn is_executable(p: &std::path::Path) -> bool {
+    if !p.is_file() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        return p
+            .extension()
+            .map(|e| e.eq_ignore_ascii_case("exe"))
+            .unwrap_or(false);
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Windows の実行ファイルも WSL の interop で動くので拾う
+        if p.extension().map(|e| e.eq_ignore_ascii_case("exe")).unwrap_or(false) {
+            return true;
+        }
+        let Ok(m) = std::fs::metadata(p) else { return false };
+        if m.permissions().mode() & 0o111 == 0 {
+            return false;
+        }
+        // 明らかに実行ファイルでない拡張子は外す
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        !matches!(ext.as_str(), "bin" | "txt" | "md" | "json" | "db" | "sfen" | "kif" | "png" | "jpg" | "so" | "dll" | "rar" | "zip" | "7z" | "pdf" | "html")
+    }
+}
+
+/// フォルダの下 2 段までにある実行ファイルを列挙する（エンジンの一括取り込み）。
+#[tauri::command]
+fn scan_executables(dir: String) -> Result<Vec<FoundExecutable>, String> {
+    let root = PathBuf::from(&dir);
+    if !root.is_dir() {
+        return Err(format!("フォルダではない: {dir}"));
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![(root, 0usize)];
+    while let Some((d, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let p = e.path();
+            if p.is_dir() {
+                if depth < 2 {
+                    stack.push((p, depth + 1));
+                }
+            } else if is_executable(&p) {
+                out.push(FoundExecutable {
+                    name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    path: p.to_string_lossy().into_owned(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+/// フォルダを OS のファイルマネージャで開く。
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// 実行環境の CPU（実行ファイルの選び分けの提案に使う）。
+#[tauri::command]
+fn cpu_info() -> serde_json::Value {
+    let mut v = serde_json::json!({ "arch": std::env::consts::ARCH, "os": std::env::consts::OS, "threads": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) });
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        v["avx2"] = serde_json::Value::Bool(std::is_x86_feature_detected!("avx2"));
+        v["avx512"] = serde_json::Value::Bool(std::is_x86_feature_detected!("avx512f"));
+        v["bmi2"] = serde_json::Value::Bool(std::is_x86_feature_detected!("bmi2"));
+    }
+    v
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let host = Arc::new(EngineHost::new());
@@ -119,6 +215,10 @@ pub fn run() {
             path_is_dir,
             read_text_file,
             write_text_file,
+            engines_dir,
+            scan_executables,
+            open_path,
+            cpu_info,
         ])
         .on_window_event(move |window, event| {
             // 窓を閉じたらエンジンを残さない。残すとやねうら王が Threads ぶんの CPU を握り続ける。

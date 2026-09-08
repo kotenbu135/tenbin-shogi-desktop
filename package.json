@@ -17,6 +17,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-opener": "^2.5.5",
     "@tauri-apps/plugin-store": "^2.4.4",
+    "onnxruntime-web": "^1.29.0",
     "shogiops": "^0.21.0"
   },
   "devDependencies": {

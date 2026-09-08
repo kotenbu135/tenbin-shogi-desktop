@@ -33,6 +33,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "licenseFile": "../LICENSE",
+    "shortDescription": "天秤将棋",
+    "longDescription": "天秤将棋・布石将棋のデスクトップ GUI。布石の段階から評価値を出し、手元の USI エンジンで検討・対局する。",
+    "windows": {
+      "nsis": {
+        "languages": [
+          "Japanese",
+          "English"
+        ],
+        "installMode": "currentUser"
+      }
+    }
   }
 }
