@@ -54,7 +54,13 @@ for (let t = 0; t < 40; t++) { await sleep(500); const rows = await ev('document
 console.log('stats:', await ev('document.querySelector(".engine-name").textContent + " | " + document.querySelector(".engine-stats").textContent'));
 console.log('rows:', await ev('[...document.querySelectorAll(".cand")].map(r=>r.textContent.replace(/\s+/g," ").trim()).join("\\n")'));
 console.log('notice:', await ev('document.querySelector(".analysis-notice").hidden ? "" : document.querySelector(".analysis-notice").textContent'));
-console.log('graph current:', await ev('document.querySelector(".tenbin .pan-label.sente").textContent'));
+// グラフは下の欄のタブ。開いてから読む
+await step('.tab[data-tab="score"]');
+await sleep(300);
+console.log('評価値のグラフ:', await ev('document.querySelector("#graph .axis.current")?.textContent + " / 点 " + document.querySelectorAll("#graph .pt").length'));
+await shot(`${OUT}/app-score.png`);
+await step('.tab[data-tab="analysis"]');
+await sleep(300);
 await sleep(1500);
 await shot(`${OUT}/app-analysis.png`);
 console.log(await step('[data-act="toggle"]'));

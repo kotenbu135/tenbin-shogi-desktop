@@ -400,14 +400,17 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .analysis-head .multipv input { width: 4em; }
 /* 枠は幅に応じて横に並べる。狭ければ 1 列に落ちる */
 .slots { overflow: auto; align-content: start; }
-.player-slots, .user-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+.player-slots, .user-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
 .analysis-slot { min-width: 0; border-top: 1px solid var(--rule); }
 .analysis-slot + .analysis-slot { border-left: 1px solid var(--rule); }
 .aslot-head { display: flex; gap: 8px; align-items: center; padding: 6px 12px 0; }
 .aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .aslot-head .aslot-remove { flex: none; }
 .player-label { font-weight: 600; }
-.analysis-status { display: flex; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
+.analysis-status { display: flex; justify-content: space-between; gap: 10px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
+/* 長いエンジン名で見出しが 2 行になり、表が下へずれるのを防ぐ */
+.analysis-status .engine-name { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.analysis-status .engine-stats { flex: 1 1 auto; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .analysis-notice { padding: 6px 12px; color: var(--ink-2); background: var(--panel-2); }
 .analysis-notice .link { margin-left: 4px; }
 .analysis-table { overflow: hidden; }
