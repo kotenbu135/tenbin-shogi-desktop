@@ -141,6 +141,23 @@ await click('.layout-dialog [data-act="reset"]');
 await new Promise((r) => setTimeout(r, 200));
 console.log('初期に戻した:', await panes());
 await ev(() => document.querySelector('.layout-dialog').close());
+// タブを掴んで運ぶ（ポインタ操作。HTML5 の drag は button では始まらない版がある）
+const dragTab = async (id, to) => {
+  const b = await (await page.$(`.tab[data-tab="${id}"]`)).boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+  await page.mouse.up();
+  await new Promise((r) => setTimeout(r, 200));
+};
+const bottom = await (await page.$('#bottom')).boundingBox();
+await dragTab('winrate', { x: bottom.x + 200, y: bottom.y + bottom.height / 2 });
+console.log('期待勝率を左の欄へ掴んで運んだ:', await panes());
+await dragTab('winrate', { x: bottom.x + bottom.width - 8, y: bottom.y + bottom.height / 2 });
+console.log('右の端へ落として新しい欄:', await panes(), '| 欄の数', await ev(() => document.querySelectorAll('.pane').length));
+await click('button[data-act="layout"]');
+await click('.layout-dialog [data-act="reset"]');
+await ev(() => document.querySelector('.layout-dialog').close());
 await tab('analysis');
 for (const b of await page.$$('.user-slots .aslot-remove')) { await b.click(); await new Promise((r) => setTimeout(r, 80)); }
 

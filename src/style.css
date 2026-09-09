@@ -49,6 +49,18 @@
     --sente: #d65a48;
     --gote: #6e93c0;
     --analysis: #5cc49a;
+    /* 暗いときは盤と駒台を落とす。明るい盤のままだと画面でいちばん眩しいのが盤になり、
+       地と図が入れ替わって読みづらい。駒は面を #fff7b7 で塗ってあるので、
+       盤を落としても駒の字と成駒の朱の見分けは落ちない */
+    --board: #96662a;
+    --stand: #7d5522;
+    --line: #120d07;
+    --selected: rgba(120, 220, 140, 0.5);
+    --selected-hover: rgba(120, 220, 140, 0.22);
+    --last-dest: rgba(214, 236, 90, 0.4);
+    --last-from: rgba(214, 236, 90, 0.18);
+    --check: rgba(255, 96, 76, 0.5);
+    --zone: rgba(255, 244, 214, 0.09);
     --board-edge: #2b2018;
     --stand-edge: #221a10;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -67,6 +79,18 @@
   --sente: #d65a48;
   --gote: #6e93c0;
   --analysis: #5cc49a;
+  /* 暗いときは盤と駒台を落とす。明るい盤のままだと画面でいちばん眩しいのが盤になり、
+     地と図が入れ替わって読みづらい。駒は面を #fff7b7 で塗ってあるので、
+     盤を落としても駒の字と成駒の朱の見分けは落ちない */
+  --board: #96662a;
+  --stand: #7d5522;
+  --line: #120d07;
+  --selected: rgba(120, 220, 140, 0.5);
+  --selected-hover: rgba(120, 220, 140, 0.22);
+  --last-dest: rgba(214, 236, 90, 0.4);
+  --last-from: rgba(214, 236, 90, 0.18);
+  --check: rgba(255, 96, 76, 0.5);
+  --zone: rgba(255, 244, 214, 0.09);
   --board-edge: #2b2018;
   --stand-edge: #221a10;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -166,18 +190,30 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 
 /* ツールバー */
 .toolbar {
-  display: flex; align-items: center; gap: 20px;
+  display: flex; align-items: center; gap: 12px;
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--rule);
+  /* 折り返して 2 行にしない。狭くなったら字を落として絵だけにする */
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-serif); font-size: 19px; letter-spacing: 0.1em; margin-right: 4px; }
+.toolbar::-webkit-scrollbar { display: none; }
+.brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; flex: none; font-family: var(--font-serif); font-size: 19px; letter-spacing: 0.1em; margin-right: 4px; }
 .brand-mark { width: 18px; height: 18px; display: inline-block; position: relative; }
 .brand-mark::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 2px; background: var(--ink); transform: rotate(-8deg); }
 .brand-mark::after { content: ''; position: absolute; left: 8px; top: 3px; width: 2px; height: 14px; background: var(--ink); }
-.tools { display: flex; gap: 6px; }
+.tools { display: flex; gap: 4px; flex: none; }
 .tools.right { margin-left: auto; }
-.tools button { padding: 0.45rem 0.9rem; }
+.tools button { padding: 0.45rem 0.8rem; white-space: nowrap; }
+/* 窓が狭いときは、右の道具から順に字を落とす（絵と title で分かる） */
+@media (max-width: 1439px) {
+  .tools.right button span { display: none; }
+  .tools.right button { padding: 0.45rem 0.55rem; }
+}
+@media (max-width: 1179px) {
+  .tools button span { display: none; }
+  .tools button { padding: 0.45rem 0.55rem; }
+}
 .tools button[aria-pressed='true'] { background: var(--panel-2); border-color: var(--ink); }
 
 /* ---- 盤・駒台・名札 ---- */
@@ -416,7 +452,7 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .analysis-head { display: flex; gap: 16px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
 .analysis-head .link { font-size: 13px; }
 .analysis-head .multipv { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
-.analysis-head .multipv input { width: 4em; }
+.analysis-head .multipv input { width: 4.6em; text-align: right; }
 /* 検討の枠は幅に応じて横に並べる。1360px の窓（既定）で 2 列。440px だと 3 列のままで読み筋が潰れる */
 .slots { overflow: auto; align-content: start; }
 .user-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
@@ -431,7 +467,6 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .play-empty { padding: 12px; color: var(--ink-2); }
 .play-empty[hidden] { display: none; }
 .aslot-head { display: flex; gap: 8px; align-items: center; padding: 6px 12px 0; }
-.aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .aslot-head .aslot-remove { flex: none; }
 .player-label { font-weight: 600; }
 .analysis-status { display: flex; justify-content: space-between; gap: 10px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
@@ -563,17 +598,11 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .form-hint { align-self: end; padding-bottom: 6px; }
 
 /* ---- 検討の枠（複数エンジン） ---- */
-.analysis { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
-.analysis-head .multipv { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); }
-.analysis-head .multipv input { width: 3.2em; }
 .analysis-head .link { white-space: nowrap; }
-.slots { overflow: auto; display: grid; align-content: start; }
 .analysis-slot { border-bottom: 2px solid var(--rule-strong); }
 .analysis-slot:last-child { border-bottom: 0; }
-.aslot-head { display: flex; gap: 6px; align-items: center; padding: 6px 12px 0; }
 .aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .aslot-remove { color: var(--ink-3); }
-.slots .analysis-table { overflow: visible; }
 .analysis-slot.player .aslot-head { padding-top: 8px; }
 .player-label { font-weight: 600; }
 .analysis-slot.player { background: var(--panel-2); }

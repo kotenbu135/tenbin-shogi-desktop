@@ -267,14 +267,15 @@ class Slot {
     }
     // 列は ShogiHome と同じ 順位 / 深さ / Node数 / 評価値 に、期待勝率 を足して 読み筋。
     // 評価値と期待勝率は**どちらも先手から見た値**（符号と % の向きが食い違わないように）。
+    // 布石の深さ・Node数 は価値ネットの内部の数字で、読みの深さではない。列ごと出さず読み筋へ幅を回す
+    const fuseki = t.stage !== 'normal';
     const table = document.createElement('table');
     table.className = 'cand-table';
     table.innerHTML =
-      '<thead><tr><th class="c-rank">順位</th><th class="c-depth">深さ</th><th class="c-nodes">Node数</th>' +
+      '<thead><tr><th class="c-rank">順位</th>' +
+      (fuseki ? '' : '<th class="c-depth">深さ</th><th class="c-nodes">Node数</th>') +
       '<th class="c-score">評価値</th><th class="c-p">期待勝率</th><th class="c-pv">読み筋</th></tr></thead>';
     const body = document.createElement('tbody');
-    // 布石中の深さ・ノード数は価値ネットの内部の数字で、読みの深さではない。出さない
-    const fuseki = t.stage !== 'normal';
     for (const l of lines) {
       const pv = this.panel.pvText(l.pv, t);
       const move = pv[0] ?? '—';
@@ -284,15 +285,14 @@ class Slot {
           : l.cp !== null
             ? `${l.approx ? '≈' : ''}${l.cp > 0 ? '+' : ''}${l.cp}`
             : '—';
-      const depth = fuseki || l.depth === null ? '—' : `${l.depth}${l.seldepth !== null ? '/' + l.seldepth : ''}`;
-      const nodes = fuseki || l.nodes === null ? '—' : l.nodes.toLocaleString('ja-JP');
+      const depth = l.depth === null ? '—' : `${l.depth}${l.seldepth !== null ? '/' + l.seldepth : ''}`;
+      const nodes = l.nodes === null ? '—' : l.nodes.toLocaleString('ja-JP');
       const pct = (l.pSente * 100).toFixed(1);
       const tr = document.createElement('tr');
       tr.className = 'cand';
       tr.innerHTML = `
         <td class="c-rank">${l.multipv}</td>
-        <td class="c-depth">${escapeHtml(depth)}</td>
-        <td class="c-nodes">${escapeHtml(nodes)}</td>
+        ${fuseki ? '' : `<td class="c-depth">${escapeHtml(depth)}</td><td class="c-nodes">${escapeHtml(nodes)}</td>`}
         <td class="c-score${l.approx ? ' approx' : ''}"${l.approx ? ' title="このエンジンは評価値を出さない。勝率から換算した目安"' : ''}>${escapeHtml(scoreText)}</td>
         <td class="c-p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></td>
         <td class="c-pv"><span class="move">${escapeHtml(move)}</span> <span class="rest">${escapeHtml(pv.slice(1, 24).join(' '))}</span></td>`;

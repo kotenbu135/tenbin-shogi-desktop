@@ -6,8 +6,11 @@
 //
 // 組み替え方は 3 つ。タブを掴んで別の欄へ落とす、仕切りを掴んで幅を変える、
 // 「配置」の窓でひな形を選ぶ（1 欄 / 2 欄 / 3 欄）か、タブを左右へ送る。
-// 掴む操作が効かない環境（WebView の版によっては drag が来ない）でも困らないよう、
-// 窓の側だけで同じことが全部できるようにしてある。
+//
+// 掴む操作は HTML5 の drag ではなく**ポインタ**で作ってある。button に draggable を付けても
+// 掴めない WebView があり（button は押下を自分で処理する）、仕切りと同じ
+// pointerdown → setPointerCapture の作りなら、どの版でも同じように動くため。
+// 落とし先は「欄の上」＝その欄へ、「欄の境」と「下の欄の左右の端」＝そこに新しい欄を作る。
 
 import { ALL_TABS, defaultPanes, type LayoutSettings, type PaneSettings, type TabId } from '../settings.ts';
 
@@ -28,6 +31,9 @@ const MIN_BOTTOM = 90;
 /** 盤に残す高さ。これ以上は下の欄に渡さない */
 const MIN_TOP = 300;
 const MIN_PANE = 170;
+
+/** タブの落とし先。pane はその欄へ、new はその位置に新しい欄を作る */
+type DropTarget = { kind: 'pane'; index: number } | { kind: 'new'; at: number } | null;
 
 export class Layout {
   constructor(
@@ -75,17 +81,6 @@ export class Layout {
       bar.className = 'tabbar';
       bar.setAttribute('role', 'tablist');
       for (const t of p.tabs) bar.appendChild(this.tabButton(t, i, t === p.active));
-      bar.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        bar.classList.add('drop');
-      });
-      bar.addEventListener('dragleave', () => bar.classList.remove('drop'));
-      bar.addEventListener('drop', (e) => {
-        e.preventDefault();
-        bar.classList.remove('drop');
-        const t = e.dataTransfer?.getData('text/plain') as TabId | undefined;
-        if (t && ALL_TABS.includes(t)) this.moveTab(t, i);
-      });
       const body = document.createElement('div');
       body.className = 'tab-body';
       for (const t of p.tabs) {
@@ -103,19 +98,113 @@ export class Layout {
     b.type = 'button';
     b.className = 'tab';
     b.dataset.tab = t;
-    b.draggable = true;
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(active));
     b.title = `${TAB_LABEL[t]}（掴んで別の欄へ移せます）`;
     b.textContent = TAB_LABEL[t];
-    b.addEventListener('click', () => this.activate(pane, t));
-    b.addEventListener('dragstart', (e) => {
-      e.dataTransfer?.setData('text/plain', t);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-      b.classList.add('dragging');
-    });
-    b.addEventListener('dragend', () => b.classList.remove('dragging'));
+    b.addEventListener('pointerdown', (e) => this.dragTab(e, b, t, pane));
     return b;
+  }
+
+  /**
+   * タブを掴んで運ぶ。少し動かすまでは「押した」ままにしておき、動かしたら運ぶ。
+   * 落とし先は欄・欄の境・下の欄の左右の端。境と端に落とすと新しい欄ができる。
+   */
+  private dragTab(e: PointerEvent, b: HTMLButtonElement, tab: TabId, pane: number): void {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    b.setPointerCapture(e.pointerId);
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let ghost: HTMLElement | null = null;
+    let target: DropTarget = null;
+    const move = (ev: PointerEvent) => {
+      if (!ghost && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      if (!ghost) {
+        ghost = document.createElement('div');
+        ghost.className = 'tab-ghost';
+        ghost.textContent = TAB_LABEL[tab];
+        document.body.appendChild(ghost);
+        b.classList.add('dragging');
+      }
+      ghost.style.left = `${ev.clientX}px`;
+      ghost.style.top = `${ev.clientY}px`;
+      target = this.dropTarget(ev.clientX, ev.clientY);
+      this.paintDropHint(target);
+    };
+    const up = () => {
+      b.removeEventListener('pointermove', move);
+      b.removeEventListener('pointerup', up);
+      b.removeEventListener('pointercancel', up);
+      b.classList.remove('dragging');
+      ghost?.remove();
+      this.paintDropHint(null);
+      if (!ghost) {
+        this.activate(pane, tab); // 動かさなかった＝ただの押下
+        return;
+      }
+      if (target?.kind === 'pane') this.moveTab(tab, target.index);
+      else if (target?.kind === 'new') this.newPaneWith(tab, target.at);
+    };
+    b.addEventListener('pointermove', move);
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+  }
+
+  /** その座標の落とし先 */
+  private dropTarget(x: number, y: number): DropTarget {
+    const r = this.bottom.getBoundingClientRect();
+    if (y < r.top - 60 || y > r.bottom + 60 || x < r.left - 40 || x > r.right + 40) return null;
+    const EDGE = 40;
+    if (x <= r.left + EDGE) return { kind: 'new', at: 0 };
+    if (x >= r.right - EDGE) return { kind: 'new', at: this.panes.length };
+    const el = document.elementFromPoint(Math.min(Math.max(x, r.left + 1), r.right - 1), Math.min(Math.max(y, r.top + 1), r.bottom - 1));
+    const split = el?.closest<HTMLElement>('.pane-split');
+    if (split) return { kind: 'new', at: Number(split.dataset.left ?? 0) + 1 };
+    const p = el?.closest<HTMLElement>('.pane');
+    if (p) return { kind: 'pane', index: Number(p.dataset.pane ?? 0) };
+    return null;
+  }
+
+  private paintDropHint(target: DropTarget): void {
+    for (const p of this.bottom.querySelectorAll('.pane')) p.classList.remove('drop');
+    let marker = this.bottom.querySelector<HTMLElement>('.pane-marker');
+    if (!target || target.kind === 'pane') marker?.remove();
+    if (!target) return;
+    if (target.kind === 'pane') {
+      this.bottom.querySelector(`[data-pane="${target.index}"]`)?.classList.add('drop');
+      return;
+    }
+    if (!marker) {
+      marker = document.createElement('div');
+      marker.className = 'pane-marker';
+      this.bottom.appendChild(marker);
+    }
+    const r = this.bottom.getBoundingClientRect();
+    const at = target.at;
+    const el = this.bottom.querySelector<HTMLElement>(`[data-pane="${Math.min(at, this.panes.length - 1)}"]`);
+    const box = el?.getBoundingClientRect();
+    marker.style.left = `${(at >= this.panes.length ? (box?.right ?? r.right) : (box?.left ?? r.left)) - r.left - 2}px`;
+  }
+
+  /** タブを新しい欄に出す。at は左から数えた入れる位置 */
+  newPaneWith(tab: TabId, at: number): void {
+    const l = this.deps.layout();
+    const from = l.panes.findIndex((p) => p.tabs.includes(tab));
+    if (from < 0) return;
+    const src = l.panes[from]!;
+    if (src.tabs.length === 1) {
+      // もともと 1 枚だけの欄。増やさず、並び順だけ変える
+      const [p] = l.panes.splice(from, 1);
+      l.panes.splice(at > from ? at - 1 : at, 0, p!);
+      this.commit();
+      return;
+    }
+    src.tabs = src.tabs.filter((t) => t !== tab);
+    if (src.active === tab) src.active = src.tabs[0]!;
+    src.ratio /= 2;
+    l.panes.splice(at, 0, { tabs: [tab], active: tab, ratio: src.ratio });
+    this.commit();
   }
 
   private activate(pane: number, t: TabId): void {
@@ -228,6 +317,7 @@ export class Layout {
     el.setAttribute('role', 'separator');
     el.setAttribute('aria-orientation', 'vertical');
     el.setAttribute('aria-label', '欄の境');
+    el.dataset.left = String(left);
     const resize = (x: number) => {
       const a = this.bottom.querySelector<HTMLElement>(`[data-pane="${left}"]`);
       const b = this.bottom.querySelector<HTMLElement>(`[data-pane="${left + 1}"]`);

@@ -672,20 +672,20 @@ async function main(): Promise<void> {
   toolbar.innerHTML = `
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>天秤将棋</span></div>
     <div class="tools">
-      <button type="button" data-act="new">${ICON.play}<span>新しい対局</span></button>
-      <button type="button" data-act="undo">${ICON.undo}<span>待った</span></button>
-      <button type="button" data-act="resign">${ICON.flag}<span>投了</span></button>
+      <button type="button" data-act="new" title="新しい対局">${ICON.play}<span>新しい対局</span></button>
+      <button type="button" data-act="undo" title="待った（1 手戻す）">${ICON.undo}<span>待った</span></button>
+      <button type="button" data-act="resign" title="投了">${ICON.flag}<span>投了</span></button>
       <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める">${ICON.pause}<span>一時停止</span></button>
-      <button type="button" data-act="flip">${ICON.flip}<span>盤面反転</span></button>
+      <button type="button" data-act="flip" title="盤面反転">${ICON.flip}<span>盤面反転</span></button>
       <button type="button" data-act="layout" title="下の欄の並びを変える">${ICON.layout}<span>配置</span></button>
-      <button type="button" data-act="edit">${ICON.edit}<span>局面編集</span></button>
-      <button type="button" data-act="open">${ICON.open}<span>開く</span></button>
-      <button type="button" data-act="save">${ICON.save}<span>保存</span></button>
+      <button type="button" data-act="edit" title="局面編集">${ICON.edit}<span>局面編集</span></button>
+      <button type="button" data-act="open" title="棋譜を開く">${ICON.open}<span>開く</span></button>
+      <button type="button" data-act="save" title="棋譜を保存">${ICON.save}<span>保存</span></button>
     </div>
     <div class="tools right">
-      <button type="button" data-act="console" aria-pressed="false">${ICON.terminal}<span>USI ログ</span></button>
-      <button type="button" data-act="engines">${ICON.sliders}<span>エンジン</span></button>
-      <button type="button" data-act="theme">${ICON.theme}<span>テーマ</span></button>
+      <button type="button" data-act="console" aria-pressed="false" title="USI ログ">${ICON.terminal}<span>USI ログ</span></button>
+      <button type="button" data-act="engines" title="エンジンの登録">${ICON.sliders}<span>エンジン</span></button>
+      <button type="button" data-act="theme" title="明るさを切り替える">${ICON.theme}<span>テーマ</span></button>
     </div>`;
   const saveMenu = document.createElement('dialog');
   saveMenu.className = 'save-dialog';
