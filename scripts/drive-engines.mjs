@@ -27,6 +27,7 @@ const evAsync = async (body, timeoutMs = 60000) => {
 };
 const shot = async (name) => { try { const r = await call('Page.snapshotRect', { x: 0, y: 0, width: 1360, height: 860, coordinateSystem: 'Viewport' }); fs.writeFileSync(name, Buffer.from(r.dataURL.split(',')[1], 'base64')); console.log('shot', name); } catch (e) { console.log('snapshot failed:', e.message.slice(0, 200)); } };
 const status = () => ev('document.getElementById("status").textContent');
+const openAnalysisTab = async () => { await ev('document.querySelector(".tab[data-tab=\'analysis\']")?.click()'); await sleep(150); };
 const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'missing '+${JSON.stringify(sel)}; e.click(); return 'ok'})()`);
 
 for (let t = 0; t < 120; t++) { if (await ev('!!(window.tenbin && window.tenbin.builtin && window.tenbin.builtin())')) break; await sleep(500); }
@@ -79,7 +80,7 @@ await evAsync(`
   return g.moves.length;`);
 await ev('window.tenbin.load(window.tenbin.kif()); 0');   // 表示を作り直す
 console.log('局面:', await status());
-console.log(await step('[data-act="toggle"]'));
+console.log((await openAnalysisTab(), await step('[data-act="toggle"]')));
 for (let t = 0; t < 60; t++) { await sleep(500); if ((await ev('document.querySelectorAll(".analysis-slot .cand").length')) >= 3) break; }
 console.log('枠1:', await ev('(()=>{const s=document.querySelector(".analysis-slot"); return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | " + [...s.querySelectorAll(".cand")].slice(0,3).map(c=>c.querySelector(".c-pv .move").textContent+" "+c.querySelector(".c-score").textContent+" "+c.querySelector(".c-p .num").textContent).join(" / ")})()'));
 const other = await ev('(window.tenbin.settings.engines.find(e => e.kind === "normal" && e.id !== ' + JSON.stringify(reg.id) + ') || {}).id || ""');
@@ -96,7 +97,7 @@ await ev('window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", 
 await sleep(3000);
 console.log('局面:', await status());
 console.log('40手目の枠1:', await ev('(()=>{const s=document.querySelector(".analysis-slot"); return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | cands=" + s.querySelectorAll(".cand").length})()'));
-console.log(await step('[data-act="toggle"]'));
+console.log((await openAnalysisTab(), await step('[data-act="toggle"]')));
 await sleep(800);
 console.log('log tail:', await ev('[...document.querySelectorAll(".console-body span")].slice(-3).map(s=>s.textContent.trim().slice(0,120)).join(" || ")'));
 ws.close();

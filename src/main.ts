@@ -58,6 +58,8 @@ async function main(): Promise<void> {
   /** 手数ごとの評価。対局の系列と検討の系列を別に持つ（鍵は "source:ply"） */
   const evals = new Map<string, EvalPoint>();
   let shapes: Shape[] = [];
+  /** 手で盤を反転したか。したら自動の反転はしない */
+  let flipLocked = false;
   let editor: PositionEditor | null = null;
 
   const status = $('status');
@@ -104,8 +106,9 @@ async function main(): Promise<void> {
       setEval(ply, ev, source);
       const v = lastView ?? currentView();
       paintGraph(ply === v.ply ? { p: ev.p, cp: ev.cp, approx: ev.approx } : null);
-      // 矢印は検討の候補だけ。対局中のエンジンの読みは盤に出さない（人が相手のとき、手を先に見せない）
-      if (source !== 'analysis') return;
+      // 矢印は検討の候補だけ。ただし**エンジン同士**なら対局中の読みも出す
+      // （人に手を先に見せる心配が無い。人が入っている対局では出さない）
+      if (source !== 'analysis' && !driver.allEngines) return;
       shapes = [];
       for (const l of lines.slice(0, 3)) {
         const mv = l.pv[0];
@@ -352,6 +355,7 @@ async function main(): Promise<void> {
     cursor = null;
     evals.clear();
     shapes = [];
+    flipLocked = false;
     board.clearSelection();
     paintAll();
   }
@@ -461,7 +465,7 @@ async function main(): Promise<void> {
     const v = lastView ?? currentView();
     const live = cursor === null;
     board.render(v.snapshot, {
-      interactive: live && v.phase !== 'over' && v.phase !== 'choose',
+      interactive: live && !driver.isPaused && v.phase !== 'over' && v.phase !== 'choose',
       phase: v.phase,
       dropSquares: (role) => (live ? game.dropSquares(role) : new Set()),
       moveDests: (from) => (live ? game.moveDests(from) : new Set()),
@@ -479,13 +483,50 @@ async function main(): Promise<void> {
     const v = currentView();
     lastView = v;
     shapes = [];
+    autoFlip();
     paintBoard();
     kifu.render(game.moves, cursor, cursor === null ? undefined : `${v.ply}手目の局面を表示中`);
     paintSide(v);
     paintPlaySides();
     paintGraph(null);
-    say(cursor === null ? phaseText(v) : `${phaseText(v)} · 過去の局面（→ か End で最新へ）`);
+    paintToolbar();
+    say(
+      cursor !== null
+        ? `${phaseText(v)} · 過去の局面（→ か End で最新へ）`
+        : driver.isPaused
+          ? `${phaseText(v)} · 一時停止中（「再開」で続きます）`
+          : phaseText(v),
+    );
     void analysis.setTarget(targetOf(v));
+  }
+
+  /** 人が 1 人だけの対局なら、その人の側から見た向きにする。手で反転したらそれを尊重する */
+  function autoFlip(): void {
+    if (flipLocked || beforeChoice()) return;
+    const seat = driver.soleHumanSeat();
+    if (seat === null) return;
+    board.setOrientation(driver.seatOfColor('sente') === seat ? 'sente' : 'gote');
+  }
+
+  function paintToolbar(): void {
+    const b = document.querySelector<HTMLButtonElement>('[data-act="pause"]');
+    if (!b) return;
+    const on = driver.isPaused;
+    b.innerHTML = `${on ? ICON.play : ICON.pause}<span>${on ? '再開' : '一時停止'}</span>`;
+    b.disabled = !driver.active || game.phase === 'over';
+    b.setAttribute('aria-pressed', String(on));
+  }
+
+  /** 対局を止める・続ける。考えているエンジンを止め、時計も止める */
+  async function togglePause(): Promise<void> {
+    if (driver.isPaused) {
+      driver.resume();
+      if (clock.enabled && game.phase !== 'over') clock.start(game.turn);
+    } else {
+      await driver.pause();
+      clock.stop();
+    }
+    paintAll();
   }
 
   function paintSide(v: ViewState): void {
@@ -614,6 +655,7 @@ async function main(): Promise<void> {
     void driver.abort();
     void kifuAnalyzer.stop();
     analysis.clearPlayers();
+    flipLocked = false;
     if (editor) exitEditor();
     game = rebuild(fuseki, k.mode, k.tokens, { startSfen: k.startSfen, times: k.times });
     meta = { sente: k.sente ?? '', gote: k.gote ?? '', timeControl: k.timeControl, startedAt: new Date() };
@@ -633,6 +675,7 @@ async function main(): Promise<void> {
       <button type="button" data-act="new">${ICON.play}<span>新しい対局</span></button>
       <button type="button" data-act="undo">${ICON.undo}<span>待った</span></button>
       <button type="button" data-act="resign">${ICON.flag}<span>投了</span></button>
+      <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める">${ICON.pause}<span>一時停止</span></button>
       <button type="button" data-act="flip">${ICON.flip}<span>盤面反転</span></button>
       <button type="button" data-act="layout" title="下の欄の並びを変える">${ICON.layout}<span>配置</span></button>
       <button type="button" data-act="edit">${ICON.edit}<span>局面編集</span></button>
@@ -676,7 +719,12 @@ async function main(): Promise<void> {
         if (cursor === null && !editor && game.phase !== 'over' && confirm(`${colorName(game.turn)}が投了しますか`)) tryApply('resign');
         break;
       case 'flip':
+        // 手で向きを決めたら、以後は自動で反転しない
+        flipLocked = true;
         board.setOrientation(board.currentOrientation === 'sente' ? 'gote' : 'sente');
+        break;
+      case 'pause':
+        void togglePause();
         break;
       case 'layout':
         layout.openMenu($('dialogs'));
@@ -770,6 +818,7 @@ function applyTheme(theme: Settings['theme']): void {
 
 const ICON = {
   play: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z"/></svg>',
+  pause: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z"/></svg>',
   undo: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M8 5 4 9l4 4M4 9h8a4 4 0 0 1 0 8h-2"/></svg>',
   flag: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M5 17V3.5M5 4h10l-2.5 3.5L15 11H5"/></svg>',
   flip: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 7.5h11l-3-3M16 12.5H5l3 3"/></svg>',

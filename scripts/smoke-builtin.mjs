@@ -26,6 +26,7 @@ await page.waitForFunction(() => window.tenbin?.builtin?.(), { timeout: 30000 })
 console.log('内蔵:', await ev(() => { const b = window.tenbin.builtin(); return `${b.manifest.generation} kings=${!!b.kings}`; }));
 
 // 2. 天秤将棋の 1 手目を内蔵で検討（両玉の価値表）
+await click('.tab[data-tab="analysis"]');
 await click('button[data-act="toggle"]');
 await page.waitForFunction(() => document.querySelectorAll('.analysis-slot .cand').length > 0, { timeout: 20000 });
 console.log('1手目の候補:', await ev(() => [...document.querySelectorAll('.analysis-slot .cand')].slice(0, 3).map((c) => c.querySelector('.c-pv .move').textContent + ' ' + c.querySelector('.c-p .num').textContent).join(' | ')),

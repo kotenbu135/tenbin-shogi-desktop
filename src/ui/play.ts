@@ -31,12 +31,27 @@ export interface PlayDeps {
   onThinkEnd(seat: 0 | 1, state: string): void;
 }
 
+/** 画面が 1 度描かれるのを待つ。描かれない場（背景のタブなど）でも 60ms で戻る */
+function painted(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const fin = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    requestAnimationFrame(() => setTimeout(fin, 0));
+    setTimeout(fin, 60);
+  });
+}
+
 export class MatchDriver {
   private seats: [PlayerSpec, PlayerSpec] | null = null;
   private names: [string, string] = ['', ''];
   private thinkers = new Map<string, Thinker>();
   private gen = 0;
   private pendingKey: string | null = null;
+  private paused = false;
   /** 読みを出している席（中断のときに枠を閉じる） */
   private thinkingSeat: 0 | 1 | null = null;
 
@@ -51,9 +66,39 @@ export class MatchDriver {
     return this.seats !== null;
   }
 
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * 一時停止。考えているエンジンを止め、結果は捨てる（gen を進めるので、遅れて届く
+   * bestmove は着手されない）。再開までどの席も指さない。
+   */
+  async pause(): Promise<void> {
+    if (this.paused || !this.playing) return;
+    this.paused = true;
+    this.gen++;
+    this.pendingKey = null;
+    this.endThinking('一時停止');
+    await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
+  }
+
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.kick();
+  }
+
   /** 両方の側がエンジンか（人に手を先に見せる心配が無い） */
   get allEngines(): boolean {
     return this.seats !== null && this.seats.every((s) => s.type === 'engine');
+  }
+
+  /** 人が指す席が 1 つだけならその席。人が 0 人か 2 人なら null（盤を自動で向ける先） */
+  soleHumanSeat(): 0 | 1 | null {
+    if (!this.seats) return null;
+    const humans = ([0, 1] as const).filter((i) => this.seats![i]!.type === 'human');
+    return humans.length === 1 ? humans[0]! : null;
   }
 
   /** その席の、いまの段階の指し手を人が入れるか */
@@ -69,6 +114,7 @@ export class MatchDriver {
   async start(choice: NewGameChoice): Promise<void> {
     this.gen++;
     this.pendingKey = null;
+    this.paused = false;
     this.seats = choice.seats;
     this.names = choice.names;
     await Promise.all([...this.thinkers.values()].map((t) => t.newGame()));
@@ -79,6 +125,7 @@ export class MatchDriver {
   async abort(): Promise<void> {
     this.gen++;
     this.pendingKey = null;
+    this.paused = false;
     this.endThinking('中断');
     this.seats = null;
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
@@ -155,7 +202,7 @@ export class MatchDriver {
 
   private async maybeMove(): Promise<void> {
     const g = this.deps.game();
-    if (!this.deps.live()) return;
+    if (this.paused || !this.deps.live()) return;
     const cur = this.currentEngineSeat();
     if (!cur) return;
     const key = `${g.moves.length}:${cur.seat}`;
@@ -245,6 +292,9 @@ export class MatchDriver {
       try {
         await builtin.start();
         await builtin.goInfinite(g.positionCommand(), onInfo);
+        // 内蔵の評価は読みが一瞬で終わる。ここで 1 度画面に描かせないと、候補の矢印が
+        // 出る間もなく次の手が指されてしまう（外のエンジンは読んでいる間ずっと出ている）
+        await painted();
       } catch (e) {
         this.deps.onLog('内蔵の布石評価', 'sys', `候補を出せない: ${e instanceof Error ? e.message : String(e)}`);
       }

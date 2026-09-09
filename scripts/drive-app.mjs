@@ -28,19 +28,20 @@ console.log('tauri?', await ev('"__TAURI_INTERNALS__" in window'), '|', await ev
 console.log('engine select:', await ev('[...document.querySelectorAll(".engine-select option")].map(o=>o.textContent).join(",")'));
 await shot(`${OUT}/app-start.png`);
 // 両玉→選択→布石38手
+const openAnalysisTab = async () => { await ev('document.querySelector(".tab[data-tab=\'analysis\']")?.click()'); await sleep(150); };
 const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'missing '+${JSON.stringify(sel)}; e.click(); return 'ok'})()`);
 console.log(await step('.stand-pieces[data-color="sente"] .slot[data-role="king"]'), await step('.cell[data-sq="5i"]'));
 console.log(await step('.stand-pieces[data-color="gote"] .slot[data-role="king"]'), await step('.cell[data-sq="5a"]'));
 console.log(await ev('(()=>{const b=[...document.querySelectorAll(".choose button")][0]; b.click(); return "chose"})()'));
 // 布石中（3手目）の検討: 布石対応エンジンなら候補が並ぶ
-console.log('fuseki analysis:', await step('[data-act="toggle"]'));
+console.log('fuseki analysis:', (await openAnalysisTab(), await step('[data-act="toggle"]')));
 for (let t = 0; t < 60; t++) { await sleep(500); const rows = await ev('document.querySelectorAll(".cand").length'); if (rows >= 3) break; }
 console.log('fuseki stats:', await ev('document.querySelector(".engine-name").textContent + " | " + document.querySelector(".engine-stats").textContent'));
 console.log('fuseki rows:', await ev('[...document.querySelectorAll(".cand")].map(r=>r.textContent.replace(/\\s+/g," ").trim()).join("\\n")'));
 console.log('fuseki notice:', await ev('document.querySelector(".analysis-notice").hidden ? "" : document.querySelector(".analysis-notice").textContent'));
 await sleep(600);
 await shot(`${OUT}/app-fuseki-analysis.png`);
-console.log('stop:', await step('[data-act="toggle"]'));
+console.log('stop:', (await openAnalysisTab(), await step('[data-act="toggle"]')));
 await sleep(500);
 for (let i = 0; i < 38; i++) {
   const r = await ev(`(()=>{const t=document.getElementById("status").textContent.includes("先手")?"sente":"gote"; const h=document.querySelector(".stand-pieces[data-color='"+t+"'] .slot:not(:disabled)"); if(!h) return "no hand"; h.click(); const d=document.querySelector(".cell.dest"); if(!d) return "no dest"; d.click(); return "ok"})()`);
@@ -49,7 +50,7 @@ for (let i = 0; i < 38; i++) {
 console.log('status:', await ev('document.getElementById("status").textContent'));
 await shot(`${OUT}/app-41.png`);
 // 検討開始
-console.log(await step('[data-act="toggle"]'));
+console.log((await openAnalysisTab(), await step('[data-act="toggle"]')));
 for (let t = 0; t < 40; t++) { await sleep(500); const rows = await ev('document.querySelectorAll(".cand").length'); if (rows >= 3) break; }
 console.log('stats:', await ev('document.querySelector(".engine-name").textContent + " | " + document.querySelector(".engine-stats").textContent'));
 console.log('rows:', await ev('[...document.querySelectorAll(".cand")].map(r=>r.textContent.replace(/\s+/g," ").trim()).join("\\n")'));
@@ -63,7 +64,7 @@ await step('.tab[data-tab="analysis"]');
 await sleep(300);
 await sleep(1500);
 await shot(`${OUT}/app-analysis.png`);
-console.log(await step('[data-act="toggle"]'));
+console.log((await openAnalysisTab(), await step('[data-act="toggle"]')));
 await sleep(800);
 console.log('log tail:', await ev('[...document.querySelectorAll(".console-body span")].slice(-4).map(s=>s.textContent.trim()).join(" || ")'));
 // KIF をファイルに書いて読み戻す（Tauri のコマンド経由。ダイアログは自動化できないので直接呼ぶ）。

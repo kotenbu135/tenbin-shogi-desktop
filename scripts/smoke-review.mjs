@@ -153,5 +153,32 @@ console.log('狭い窓:', await ev(() => {
   return `盤 ${Math.round(b.width)}x${Math.round(b.height)} / 棋譜の幅 ${Math.round(rec.width)} / 横の溢れ ${document.documentElement.scrollWidth - document.documentElement.clientWidth}px / マス ${getComputedStyle(document.querySelector('.shogi')).getPropertyValue('--sq').trim()}`;
 }));
 
+// 9. 人が後手なら盤を自動で向ける・一時停止・エンジン同士なら盤に矢印
+await page.setViewport({ width: 1360, height: 860 });
+await new Promise((r) => setTimeout(r, 300));
+const engine = { type: 'engine', normalId: '', fusekiId: 'builtin', level: 4, secPerMove: 0.4 };
+await ev((e) => window.tenbin.play({ mode: 'fuseki', seats: [e, { type: 'human' }], names: ['甲', '乙'], timeControl: null }), engine);
+await new Promise((r) => setTimeout(r, 900));
+console.log('人が後手のとき:', await ev(() => `手前の駒台 ${document.querySelector('.stand.near .stand-pieces').dataset.color} / 候補手の欄 ${[...document.querySelectorAll('.play-slots .analysis-slot')].map((s) => `${s.querySelector('.player-label').textContent}=${s.querySelector('.engine-name').textContent}`).join(' | ')}`));
+await click('button[data-act="flip"]');
+await ev(() => window.tenbin.play({ mode: 'fuseki', seats: [{ type: 'human' }, { type: 'human' }], names: ['人', '人'], timeControl: null }));
+await new Promise((r) => setTimeout(r, 300));
+console.log('人同士に変えたら反転の固定は解ける:', await ev(() => document.querySelector('.stand.near .stand-pieces').dataset.color));
+
+await ev((e) => window.tenbin.play({ mode: 'fuseki', seats: [e, e], names: ['甲', '乙'], timeControl: null }), engine);
+await page.waitForFunction(() => window.tenbin.game().moves.length >= 3, { timeout: 30000 });
+const arrows = await page.waitForFunction(() => document.querySelectorAll('svg.shapes .shape').length, { timeout: 15000, polling: 100 }).then((h) => h.jsonValue()).catch(() => 0);
+console.log('エンジン同士の矢印:', arrows);
+await click('button[data-act="pause"]');
+await new Promise((r) => setTimeout(r, 300));
+const atPause = await ev(() => window.tenbin.game().moves.length);
+await new Promise((r) => setTimeout(r, 1500));
+const afterPause = await ev(() => window.tenbin.game().moves.length);
+console.log('一時停止:', await status(), '| 手数', atPause, '→', afterPause, '| 盤は触れない:', await ev(() => document.querySelector('.cell')?.disabled));
+await click('button[data-act="pause"]');
+await new Promise((r) => setTimeout(r, 1200));
+console.log('再開:', await ev(() => window.tenbin.game().moves.length), '手目まで進んだ');
+await ev(() => window.tenbin.start('tenbin'));
+
 console.log('errors:', errors.length ? errors : 'なし');
 await browser.close();
