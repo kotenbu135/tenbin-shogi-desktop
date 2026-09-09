@@ -63,7 +63,9 @@ jobs:
           set -eu
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          SETUP=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe)
+          # target はワークスペースの根（crates/ と src-tauri/ で共有）にある
+          SETUP=$(ls target/release/bundle/nsis/*-setup.exe src-tauri/target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
+          echo "配布物: $SETUP"
           NAME="tenbin-shogi_${VERSION}_x64-setup.exe"
           cp "$SETUP" "$NAME"
           SIG=$(cat "${SETUP}.sig")
