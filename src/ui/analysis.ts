@@ -290,7 +290,7 @@ class Slot {
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
         : this.player
           ? this.human
-            ? '<div class="analysis-empty">人が指す側です。</div>'
+            ? '<div class="analysis-empty">人が指します。</div>'
             : '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
           : '<div class="analysis-empty">検討を始めると、候補手・評価値・期待勝率がここに並びます。</div>';
       return;
@@ -356,7 +356,7 @@ export class AnalysisPanel {
         <label class="multipv" title="対局中のエンジンに送る MultiPV。増やすと候補が並ぶが、読みは少し落ちる"><span>候補</span><input type="number" min="1" max="10" value="${deps.settings().playMultiPv}" /></label>
       </div>
       <div class="play-slots"></div>
-      <div class="play-empty">対局を始めると、両方の側の候補手がここに並びます。</div>`;
+      <div class="play-empty">対局を始めると、先手と後手の候補手がここに並びます。</div>`;
     this.playersEl = playRoot.querySelector('.play-slots')!;
     this.playEmpty = playRoot.querySelector('.play-empty')!;
     const playPv = playRoot.querySelector<HTMLInputElement>('.play-head .multipv input')!;

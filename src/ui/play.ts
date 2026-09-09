@@ -187,14 +187,19 @@ export class MatchDriver {
     return color === 'sente' ? 0 : 1;
   }
 
-  /** いま手番の席のエンジン指定。人なら null */
-  private currentEngineSeat(): { seat: 0 | 1; spec: Extract<PlayerSpec, { type: 'engine' }> } | null {
+  /** いま指す（置く・選ぶ）番の席。対局が無いか終局なら null */
+  seatToMove(): 0 | 1 | null {
     const g = this.deps.game();
     if (!this.seats || g.phase === 'over') return null;
-    let seat: 0 | 1;
-    if (g.phase === 'kings') seat = 0;
-    else if (g.phase === 'choose') seat = 1;
-    else seat = this.seatOfColor(g.turn);
+    if (g.phase === 'kings') return 0;
+    if (g.phase === 'choose') return 1;
+    return this.seatOfColor(g.turn);
+  }
+
+  /** いま手番の席のエンジン指定。人なら null */
+  private currentEngineSeat(): { seat: 0 | 1; spec: Extract<PlayerSpec, { type: 'engine' }> } | null {
+    const seat = this.seatToMove();
+    if (seat === null || !this.seats) return null;
     const spec = this.seats[seat];
     if (spec.type !== 'engine') return null;
     return { seat, spec };

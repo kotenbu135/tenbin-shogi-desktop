@@ -232,7 +232,9 @@ async function main(): Promise<void> {
   function sideLabel(half: 0 | 1): string {
     if (beforeChoice()) {
       const seat = half;
-      return `${driver.seatName(seat) || (seat === 0 ? '席 A' : '席 B')}（${seat === 0 ? '玉を置く' : '先後を選ぶ'}）`;
+      const role = seat === 0 ? '玉を置く' : '先後を選ぶ';
+      const name = driver.seatName(seat);
+      return name ? `${name}（${role}）` : role;
     }
     const color: Color = half === 0 ? 'sente' : 'gote';
     return `${colorMark(color)} ${names()[color] || colorName(color)}`;
@@ -364,9 +366,8 @@ async function main(): Promise<void> {
       } else {
         const t = clock.press(game.turn);
         if (t) rec.time = t;
-      }
-      if (token !== 'timeout' && rec.time === undefined && clock.enabled === false) {
-        // 時間を計らない対局でも、指した時刻から経過秒だけは残せるが、ここでは残さない
+        // press は次の手番の時計を動かす。止めている間に並べた手で時計が動き出さないように戻す
+        if (driver.isPaused) clock.stop();
       }
       paintAll();
       driver.kick();
@@ -443,9 +444,9 @@ async function main(): Promise<void> {
     const next = v.ply + 1;
     switch (v.phase) {
       case 'kings':
-        return next === 1 ? '玉を置く役が、先手陣に先手玉を置きます' : '続けて、後手陣に後手玉を置きます';
+        return next === 1 ? '置く人が、先手陣に先手玉を置きます' : '続けて、後手陣に後手玉を置きます';
       case 'choose':
-        return '選ぶ役が、先手を持つか後手を持つかを決めます';
+        return '選ぶ人が、先手を持つか後手を持つかを決めます';
       case 'fuseki':
         return `布石 ${next}手目 · ${turn}が置きます（残り ${41 - next}手）`;
       case 'normal':
@@ -483,6 +484,16 @@ async function main(): Promise<void> {
     return { ...meta, sente: n.sente ?? '', gote: n.gote ?? '' };
   }
 
+  /**
+   * いま盤の駒を動かしてよいか。一時停止中は自分で変化を並べられる（検討のため）。
+   * 動いている対局では、その手番が人の側のときだけ（エンジンの手を人が代わりに指せてしまうのを防ぐ）。
+   */
+  function canTouchBoard(): boolean {
+    if (!driver.playing || driver.isPaused) return true;
+    const seat = driver.seatToMove();
+    return seat === null || driver.humanAt(seat);
+  }
+
   function paintBoard(): void {
     if (editor) {
       board.render(editor.snapshot(), {
@@ -498,8 +509,7 @@ async function main(): Promise<void> {
     const v = lastView ?? currentView();
     const live = cursor === null;
     board.render(v.snapshot, {
-      // 一時停止中も盤は触れる。エンジンは指さないので、検討しながら自分で変化を並べられる
-      interactive: live && v.phase !== 'over' && v.phase !== 'choose',
+      interactive: live && v.phase !== 'over' && v.phase !== 'choose' && canTouchBoard(),
       thinking: live ? thinkingColor : null,
       phase: v.phase,
       dropSquares: (role) => (live ? game.dropSquares(role) : new Set()),
@@ -609,7 +619,7 @@ async function main(): Promise<void> {
     if (v.phase === 'choose') {
       const p = document.createElement('div');
       p.className = 'choose';
-      p.innerHTML = `<p>両玉が置かれました。選ぶ役はどちらを持ちますか。</p>`;
+      p.innerHTML = `<p>両玉が置かれました。選ぶ人はどちらを持ちますか。</p>`;
       for (const c of ['sente', 'gote'] as const) {
         const b = document.createElement('button');
         b.type = 'button';
@@ -622,7 +632,7 @@ async function main(): Promise<void> {
     } else if (game.mode === 'tenbin' && game.chosenColor) {
       const p = document.createElement('div');
       p.className = 'chosen';
-      p.textContent = `選ぶ役は${colorName(game.chosenColor)}を持ちました`;
+      p.textContent = `選ぶ人は${colorName(game.chosenColor)}を持ちました`;
       el.appendChild(p);
     }
   }
@@ -862,6 +872,8 @@ async function main(): Promise<void> {
           saveMenu.showModal();
           return;
         case 'c':
+          // 文字を選んでいるならその写しが先（棋譜の一部だけ写したいことがある）
+          if (window.getSelection()?.toString()) return;
           e.preventDefault();
           void copyKif();
           return;

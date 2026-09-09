@@ -39,7 +39,7 @@ export async function checkUpdate(quiet: boolean, deps: UpdateDeps): Promise<voi
     }
     const note = (up.body ?? '').trim();
     if (!confirm(`新しい版 ${up.version} があります。取り込んで再起動しますか\n\n${note.slice(0, 400)}`)) {
-      deps.say(`新しい版 ${up.version} があります。「はじめに」→「更新を確認する」でいつでも入れられます`);
+      deps.say(`新しい版 ${up.version} があります。「はじめに」→「更新を確認」でいつでも入れられます`);
       return;
     }
     let total = 0;

@@ -76,7 +76,13 @@ export class NewGameDialog {
     const seat = (i: 0 | 1) => {
       const p = l.seats[i];
       const base = p.type === 'engine' ? p : { normalId: defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
-      const eng = { ...base, normalId: normals.some((e) => e.id === base.normalId) ? base.normalId : defNormal };
+      const fusekiIds = [HUMAN_ID, BUILTIN_ID, ...fusekis.map((e) => e.id)];
+      const eng = {
+        ...base,
+        normalId: normals.some((e) => e.id === base.normalId) ? base.normalId : defNormal,
+        // 布石も同じ。消えたエンジンを指したままだと、一覧の先頭（「人が置く」）で固まって見える
+        fusekiId: fusekiIds.includes(base.fusekiId) ? base.fusekiId : BUILTIN_ID,
+      };
       return `
         <fieldset class="seat" data-seat="${i}">
           <legend class="seat-title"></legend>
@@ -125,7 +131,7 @@ export class NewGameDialog {
     const form = this.dialog.querySelector('form')!;
     const seatTitles = () => {
       const mode = (form.elements.namedItem('mode') as RadioNodeList).value as Mode;
-      const titles = mode === 'tenbin' ? ['玉を置く側', '先後を選ぶ側'] : ['先手', '後手'];
+      const titles = mode === 'tenbin' ? ['玉を置く', '先後を選ぶ'] : ['先手', '後手'];
       this.dialog.querySelectorAll('.seat-title').forEach((el, i) => (el.textContent = titles[i]!));
       // 天秤将棋は始める時点で先後が決まっていない。名前の下敷きも役の名で出す
       this.dialog.querySelectorAll<HTMLInputElement>('.seat input[name^="name"]').forEach((el, i) => (el.placeholder = titles[i]!));
