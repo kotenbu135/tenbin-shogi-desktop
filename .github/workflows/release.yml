@@ -63,8 +63,15 @@ jobs:
           set -eu
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          # target はワークスペースの根（crates/ と src-tauri/ で共有）にある
-          SETUP=$(ls target/release/bundle/nsis/*-setup.exe src-tauri/target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
+          # target はワークスペースの根（crates/ と src-tauri/ で共有）。
+          # ls に無いパスを混ぜると pipefail で落ちるので find で探す
+          SETUP=$(find . -type f -name '*-setup.exe' -not -path '*/node_modules/*' 2>/dev/null | head -1 || true)
+          if [ -z "$SETUP" ]; then
+            echo '配布物が見つからない。bundle の中身:'
+            find . -type d -name bundle 2>/dev/null | head
+            find . -type f -name '*.exe' -path '*bundle*' 2>/dev/null | head
+            exit 1
+          fi
           echo "配布物: $SETUP"
           NAME="tenbin-shogi_${VERSION}_x64-setup.exe"
           cp "$SETUP" "$NAME"
