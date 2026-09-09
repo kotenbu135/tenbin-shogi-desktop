@@ -4,7 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { COMMON_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, type EngineConfig, type EngineKind } from '../usi/engine.ts';
-import { EVAL_PRESETS, presetOf, recipeFor } from '../usi/evalscale.ts';
+import { EVAL_PRESETS, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
 import { BUILTIN_ID, type Settings } from '../settings.ts';
 
@@ -126,6 +126,25 @@ export class EngineDialog {
 
   private busy(text: string): void {
     this.dialog.innerHTML = `<div class="dialog-body"><div class="dialog-head"><h2>エンジン</h2></div><p class="hint">${esc(text)}</p></div>`;
+  }
+
+  /** 取り込んだばかりのエンジンを登録して、本将棋の既定にする */
+  async addInstalled(path: string, name: string, evalScale: EvalScale): Promise<string | null> {
+    const cfg = newEngineConfig();
+    cfg.path = path;
+    cfg.name = name;
+    const err = await this.probeInto(cfg, false);
+    cfg.kind = 'normal';
+    cfg.eval = { ...evalScale };
+    const s = this.deps.settings();
+    // 同じ場所のものは置き換える（入れ直しても増やさない）
+    const i = s.engines.findIndex((e) => e.path === path);
+    if (i >= 0) cfg.id = s.engines[i]!.id;
+    if (i >= 0) s.engines[i] = cfg;
+    else s.engines.push(cfg);
+    s.normalEngineId = cfg.id;
+    await this.persist();
+    return err;
   }
 
   // ---- 追加 ----

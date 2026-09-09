@@ -70,7 +70,8 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
 export function defaultSettings(): Settings {
   return {
     engines: [],
-    theme: 'system',
+    // 明るい地を既定にする（盤と駒が明るいので、周りも明るいほうが目に馴染む）
+    theme: 'light',
     fusekiEngineId: BUILTIN_ID,
     analysisMultiPv: 3,
     playMultiPv: 3,
@@ -138,7 +139,8 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
   const engines = Array.isArray(saved.engines) ? saved.engines.map((e) => migrateEngine(e as LegacyEngine, saved.winrate)).filter((e): e is EngineConfig => e !== null) : [];
   const s: Settings = {
     ...d,
-    theme: saved.theme ?? d.theme,
+    // 'system' は古い既定。明るい地を既定にしたので明るいほうへ寄せる
+    theme: saved.theme === 'dark' ? 'dark' : 'light',
     engines,
     normalEngineId: saved.normalEngineId ?? saved.analysisEngineId,
     fusekiEngineId: saved.fusekiEngineId ?? d.fusekiEngineId,

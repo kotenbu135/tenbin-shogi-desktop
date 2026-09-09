@@ -102,6 +102,126 @@ fn write_text_file(path: String, text: String) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("書けない: {path} ({e})"))
 }
 
+/// おすすめのエンジンを取り込む。
+///
+/// やねうら王の実行ファイル（水匠5 と同じ NNUE 型のもの）と、水匠5 の評価関数を
+/// 公式の配布先から取って、エンジンのフォルダに置く。どちらも 7z で配られていて、
+/// 中には 89 本の実行ファイルが入っている。どれを使えばよいか利用者に選ばせない。
+const YANEURAOU_7Z: &str =
+    "https://github.com/yaneurao/YaneuraOu/releases/download/V9.00/yaneuraou-V900-git-win64-all.7z";
+const SUISHO5_7Z: &str =
+    "https://github.com/yaneurao/YaneuraOu/releases/download/suisho5/Suisho5.7z";
+
+/// この CPU に合う実行ファイルの接尾辞。やねうら王は CPU ごとに別の実行ファイルを配る
+fn cpu_suffix() -> &'static str {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::is_x86_feature_detected!("avx512vnni") {
+            return "AVX512VNNI";
+        }
+        if std::is_x86_feature_detected!("avx512f") {
+            return "AVX512";
+        }
+        if std::is_x86_feature_detected!("avx2") {
+            return "AVX2";
+        }
+        if std::is_x86_feature_detected!("sse4.2") {
+            return "SSE42";
+        }
+        "SSE41"
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        "AVX2"
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct InstallStep {
+    text: String,
+    percent: u32,
+}
+
+fn step(app: &AppHandle, text: &str, percent: u32) {
+    let _ = app.emit("engine-install", InstallStep { text: text.into(), percent });
+}
+
+async fn fetch_to(url: &str, to: &std::path::Path) -> Result<(), String> {
+    let res = reqwest::get(url)
+        .await
+        .map_err(|e| format!("取りに行けない: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("取れない: {e}"))?;
+    let bytes = res.bytes().await.map_err(|e| format!("読めない: {e}"))?;
+    std::fs::write(to, &bytes).map_err(|e| format!("書けない: {} ({e})", to.display()))?;
+    Ok(())
+}
+
+/// 書庫から 1 つだけ取り出す。名前の末尾で照合する（区切りは / と \ の両方がありうる）
+fn extract_one(archive: &std::path::Path, suffix: &str, to: &std::path::Path) -> Result<(), String> {
+    let mut reader = sevenz_rust2::ArchiveReader::open(archive, sevenz_rust2::Password::empty())
+        .map_err(|e| format!("書庫を開けない: {e}"))?;
+    let mut found = false;
+    // 続きを読まずに飛ばすと CRC の照合に失敗する（solid な書庫）。要らないものも読み捨てる
+    reader
+        .for_each_entries(|entry, rd| {
+            let name = entry.name().replace('\\', "/");
+            if !found && name.ends_with(suffix) {
+                let mut f = std::fs::File::create(to)?;
+                std::io::copy(rd, &mut f)?;
+                found = true;
+            } else {
+                std::io::copy(rd, &mut std::io::sink())?;
+            }
+            Ok(true)
+        })
+        .map_err(|e| format!("取り出せない: {e}"))?;
+    if !found {
+        return Err(format!("書庫の中に {suffix} が無い"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn install_recommended_engine(app: AppHandle) -> Result<String, String> {
+    let root = std::path::PathBuf::from(engines_dir(app.clone())?).join("YaneuraOu");
+    std::fs::create_dir_all(root.join("eval")).map_err(|e| format!("作れない: {e}"))?;
+    let tmp = std::env::temp_dir();
+    let a1 = tmp.join("tenbin-yaneuraou.7z");
+    let a2 = tmp.join("tenbin-suisho5.7z");
+    let exe = root.join("YaneuraOu_NNUE.exe");
+
+    step(&app, "やねうら王を取りに行っています（13MB）…", 5);
+    fetch_to(YANEURAOU_7Z, &a1).await?;
+    step(&app, "やねうら王を取り出しています…", 35);
+    let want = format!(
+        "NNUE_halfkp_256x2_32_32/YaneuraOu_NNUE_halfkp_256x2_32_32-V900Git_{}.exe",
+        cpu_suffix()
+    );
+    let (a1c, wantc, exec) = (a1.clone(), want.clone(), exe.clone());
+    tauri::async_runtime::spawn_blocking(move || extract_one(&a1c, &wantc, &exec))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    step(&app, "水匠5 の評価関数を取りに行っています（24MB）…", 55);
+    fetch_to(SUISHO5_7Z, &a2).await?;
+    step(&app, "水匠5 を取り出しています（61MB）…", 80);
+    let (a2c, nn) = (a2.clone(), root.join("eval").join("nn.bin"));
+    tauri::async_runtime::spawn_blocking(move || extract_one(&a2c, "nn.bin", &nn))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let _ = std::fs::remove_file(&a1);
+    let _ = std::fs::remove_file(&a2);
+    step(&app, "できました", 100);
+    Ok(exe.to_string_lossy().into_owned())
+}
+
 /// アプリのデータフォルダ（設定とエンジンの置き場所）。案内とアンインストールの説明に使う。
 #[tauri::command]
 fn data_dir(app: AppHandle) -> Result<String, String> {
@@ -235,6 +355,7 @@ pub fn run() {
             write_text_file,
             engines_dir,
             data_dir,
+            install_recommended_engine,
             scan_executables,
             open_path,
             cpu_info,

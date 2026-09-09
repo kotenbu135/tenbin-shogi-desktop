@@ -24,10 +24,11 @@ await new Promise((r) => setTimeout(r, 400));
 console.log('はじめての起動:', await page.evaluate(() => {
   const d = document.querySelector('.setup-dialog');
   if (!d?.open) return '案内が出ない';
-  const links = [...d.querySelectorAll('[data-act="link"]')].map((b) => b.dataset.url).join(' / ');
-  const reset = !!d.querySelector('[data-act="reset"]');
+  const body = d.querySelector('.setup-body').getBoundingClientRect().height;
+  const acts = [...d.querySelectorAll('button[data-act]')].map((b) => b.dataset.act).join(',');
+  const theme = document.documentElement.getAttribute('data-theme');
   d.close();
-  return `案内が出た · 配布先 ${links} · 初期化 ${reset}`;
+  return `案内が出た · 高さ ${Math.round(body)}px（1 画面に収まる） · 操作 ${acts} · テーマ ${theme}`;
 }));
 // 古い形の設定（タブ 1 枚を覚えるだけ）から読み直せるか。実機の settings.json はこの形で残っている
 await page.evaluate(() => localStorage.setItem('settings', JSON.stringify({ seenSetup: true, layout: { recordWidth: 300, bottomHeight: 250, tab: 'winrate' } })));

@@ -23,6 +23,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 usi-host = { path = "../crates/usi-host" }
 encoding_rs = "0.8"
+# おすすめのエンジンを取り込むため（配布物は 7z）
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "charset"] }
+sevenz-rust2 = "0.22"
 
 # 自動更新はデスクトップだけ（モバイルには入れない）
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]

@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     settings: () => settings,
     save: () => saveSettings(settings),
     openEngines: () => engineDialog.open(),
+    register: (path, name, evalScale) => engineDialog.addInstalled(path, name, evalScale),
     reset: async () => {
       await saveSettings(defaultSettings());
       location.reload();
@@ -782,7 +783,8 @@ async function main(): Promise<void> {
         engineDialog.open();
         break;
       case 'theme': {
-        const order: Settings['theme'][] = ['system', 'light', 'dark'];
+        // 明るいと暗いの 2 つだけ。'system' は古い設定の受け皿として型に残してある
+        const order: Settings['theme'][] = ['light', 'dark'];
         settings.theme = order[(order.indexOf(settings.theme) + 1) % order.length]!;
         applyTheme(settings.theme);
         void saveSettings(settings);

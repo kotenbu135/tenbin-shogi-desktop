@@ -98,18 +98,19 @@ Windows 側に Rust と Node.js を入れて `npm run tauri dev`。
 
 ## はじめに（セットアップ）
 
-アプリの「はじめに」（右上の ? ）に同じ案内があります。エンジンが 1 本も無い初回は自動で開きます。
+アプリを開くと「はじめに」が出ます（右上の ? でいつでも）。
 
-1. **やねうら王の実行ファイル**を取る: https://github.com/yaneurao/YaneuraOu/releases
-   （`YaneuraOu-*.exe`。CPU に合うものを。迷ったら AVX2）
-2. **水匠5 の評価関数**を取る: https://github.com/yaneurao/YaneuraOu/releases/tag/suisho5
-   （`Suisho5.7z` を展開すると `nn.bin`）
-3. 実行ファイルの隣に `eval/nn.bin` を置く
-4. 「エンジン」→「実行ファイルを選んで追加」。勝率の目盛りは **435 / +34**（FV_SCALE 16）を選ぶ
+**「エンジンを自動で入れる」を押すだけです。** やねうら王の実行ファイルと水匠5 の評価関数を
+公式の配布先から取ってきて、この PC の CPU に合うものを選んで置き、勝率の目盛り（652 / +51）まで
+入れて登録します（約 40MB）。
 
-評価関数を埋め込んだ `Suisho5-*.exe` を持っているなら、それだけで動きます（目盛りは **652 / +51**）。
-GPU を使う「ふかうら王」も同じ配布先にあります。
-エンジンはアプリのデータフォルダの `engines/` に置くと「フォルダから取り込む」でまとめて登録できます。
+手で入れるなら、実行ファイルをエンジンのフォルダ（「はじめに」に場所が出ます）に置いて
+「エンジン」→「フォルダから取り込む」。やねうら王を使うなら隣に `eval/nn.bin`（水匠5）を置きます。
+
+- やねうら王の実行ファイル: https://github.com/yaneurao/YaneuraOu/releases/tag/V9.00
+  （`yaneuraou-V900-git-win64-all.7z` の中の `NNUE_halfkp_256x2_32_32/…_AVX2.exe` が水匠5 用）
+- 水匠5 の評価関数: https://github.com/yaneurao/YaneuraOu/releases/tag/suisho5
+  （`Suisho5.7z` を展開すると `nn.bin`。FV_SCALE の最適値は 24 なので目盛りは 652 / +51）
 
 布石（1〜40手目）の評価は内蔵しているので、**エンジンが無くても布石の検討と AI との対局はできます**。
 
