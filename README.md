@@ -113,6 +113,27 @@ GPU を使う「ふかうら王」も同じ配布先にあります。
 
 布石（1〜40手目）の評価は内蔵しているので、**エンジンが無くても布石の検討と AI との対局はできます**。
 
+## 更新
+
+起動のたびに新しい版が出ていないか見に行きます（GitHub の Releases の `latest.json`）。
+見つかったら知らせ、**承諾したときだけ**取り込んで入れ替え、再起動します。
+「はじめに」→「更新を確認する」でいつでも確かめられます。
+
+配る側の手順:
+
+1. `package.json` と `src-tauri/tauri.conf.json` の `version` を上げる
+2. `git tag v0.2.0 && git push --tags` → `.github/workflows/release.yml` が Windows の配布物を作り、
+   Releases に**下書き**で置く（`latest.json` つき）
+3. 中身を確かめて publish する
+
+署名の鍵が要ります。`npx tauri signer generate -w <保管場所>/tenbin-updater.key` で作り、
+公開鍵は `src-tauri/tauri.conf.json` の `plugins.updater.pubkey`、秘密鍵はリポジトリの
+Secrets（`TAURI_SIGNING_PRIVATE_KEY` と `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）に入れます。
+**秘密鍵をリポジトリに入れてはいけません。無くすと更新を配れなくなります。**
+
+リポジトリが private のあいだは、利用者のアプリから `latest.json` を取れません。
+公開にするか、`plugins.updater.endpoints` を自分の置き場所（Cloudflare Pages など）に変えてください。
+
 ## やめるとき（アンインストール）
 
 - アプリ本体: Windows は「設定 → アプリ」から「天秤将棋」をアンインストール。展開しただけの版はそのフォルダを消す

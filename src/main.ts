@@ -10,6 +10,7 @@ import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { Layout } from './ui/layout.ts';
 import { SetupDialog } from './ui/setup.ts';
+import { checkUpdate } from './ui/update.ts';
 import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel, type Target } from './ui/analysis.ts';
 import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
@@ -64,6 +65,8 @@ async function main(): Promise<void> {
   let shapes: Shape[] = [];
   /** 手で盤を反転したか。したら自動の反転はしない */
   let flipLocked = false;
+  /** エンジンが考えている側。名札に動く印を出すため */
+  let thinkingColor: Color | null = null;
   let editor: PositionEditor | null = null;
 
   const status = $('status');
@@ -88,6 +91,8 @@ async function main(): Promise<void> {
       await saveSettings(defaultSettings());
       location.reload();
     },
+    openLayout: () => layout.openMenu($('dialogs')),
+    say: (text, error) => say(text, error),
   });
 
   /** id（'builtin' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
@@ -189,15 +194,21 @@ async function main(): Promise<void> {
     createThinker,
     say: (text, error) => say(text, error),
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
-    onThinkStart: (seat, _color, cfg) => {
+    onThinkStart: (seat, color, cfg) => {
       const half = halfOfSeat(seat);
       halfInUse.set(seat, half);
+      thinkingColor = color;
       analysis.beginPlayer(half, sideLabel(half), cfg, targetOf(game.view()));
+      paintBoard();
     },
     multiPv: () => settings.playMultiPv,
     canApply: (token) => game.canApply(token),
     onThinking: (seat, info) => analysis.playerInfo(halfInUse.get(seat) ?? halfOfSeat(seat), info),
-    onThinkEnd: (seat, state) => analysis.endPlayer(halfInUse.get(seat) ?? halfOfSeat(seat), state),
+    onThinkEnd: (seat, state) => {
+      thinkingColor = null;
+      analysis.endPlayer(halfInUse.get(seat) ?? halfOfSeat(seat), state);
+      paintBoard();
+    },
   });
 
   /** 候補手の欄の左右。0 が先手側、1 が後手側（先後が決まる前は席の順） */
@@ -481,6 +492,7 @@ async function main(): Promise<void> {
     const live = cursor === null;
     board.render(v.snapshot, {
       interactive: live && !driver.isPaused && v.phase !== 'over' && v.phase !== 'choose',
+      thinking: live ? thinkingColor : null,
       phase: v.phase,
       dropSquares: (role) => (live ? game.dropSquares(role) : new Set()),
       moveDests: (from) => (live ? game.moveDests(from) : new Set()),
@@ -505,6 +517,7 @@ async function main(): Promise<void> {
     paintPlaySides();
     paintGraph(null);
     paintToolbar();
+    kifu.revealCurrent();
     say(
       cursor !== null
         ? `${phaseText(v)} · 過去の局面（→ か End で最新へ）`
@@ -693,7 +706,6 @@ async function main(): Promise<void> {
       <button type="button" data-act="resign" title="投了">${ICON.flag}<span>投了</span></button>
       <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める">${ICON.pause}<span>一時停止</span></button>
       <button type="button" data-act="flip" title="盤面反転">${ICON.flip}<span>盤面反転</span></button>
-      <button type="button" data-act="layout" title="下の欄の並びを変える">${ICON.layout}<span>配置</span></button>
       <button type="button" data-act="edit" title="局面編集">${ICON.edit}<span>局面編集</span></button>
       <button type="button" data-act="open" title="棋譜を開く">${ICON.open}<span>開く</span></button>
       <button type="button" data-act="save" title="棋譜を保存">${ICON.save}<span>保存</span></button>
@@ -742,9 +754,6 @@ async function main(): Promise<void> {
         break;
       case 'pause':
         void togglePause();
-        break;
-      case 'layout':
-        layout.openMenu($('dialogs'));
         break;
       case 'edit':
         if (editor) {
@@ -825,6 +834,8 @@ async function main(): Promise<void> {
     void saveSettings(settings);
     void setupDialog.open();
   }
+  // 新しい版が出ていれば知らせる（承諾したときだけ入れ替える）
+  void checkUpdate(true, { say: (text, error) => say(text, error) });
   builtin = await loadBuiltin((t) => usiConsole.append('sys', t));
   analysis.refreshEngineList();
   if (!isTauri()) {

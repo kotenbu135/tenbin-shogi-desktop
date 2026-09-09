@@ -80,6 +80,11 @@ export class Layout {
       const bar = document.createElement('div');
       bar.className = 'tabbar';
       bar.setAttribute('role', 'tablist');
+      bar.title = 'タブは掴んで別の欄へ移せます（右押しで配置の窓）';
+      bar.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.openMenu(document.getElementById('dialogs') ?? document.body);
+      });
       for (const t of p.tabs) bar.appendChild(this.tabButton(t, i, t === p.active));
       const body = document.createElement('div');
       body.className = 'tab-body';
@@ -287,7 +292,7 @@ export class Layout {
   reset(): void {
     const l = this.deps.layout();
     l.recordWidth = 320;
-    l.bottomHeight = 270;
+    l.bottomHeight = 248;
     l.panes = defaultPanes();
     this.commit();
   }

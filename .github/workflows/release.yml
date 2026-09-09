@@ -1,0 +1,44 @@
+# タグを打つと Windows の配布物を作り、Releases に下書きで置く。
+# 自動更新はここに置かれる latest.json を見に行くので、**署名の鍵が要る**。
+#
+#   リポジトリの Settings → Secrets and variables → Actions に
+#     TAURI_SIGNING_PRIVATE_KEY           鍵ファイルの中身（tenbin-updater.key）
+#     TAURI_SIGNING_PRIVATE_KEY_PASSWORD  鍵の合言葉（作るとき空にしたなら空のまま）
+#
+# 手順: package.json と src-tauri/tauri.conf.json の version を上げる → `git tag v0.2.0` → push。
+# 下書きの Release を確かめてから publish すると、利用者のアプリが次の起動で気づく。
+# **リポジトリが private のあいだは利用者側から latest.json を取れない**（公開にするか、別の置き場所にする）。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 天秤将棋 __VERSION__
+          releaseBody: 変更の中身はコミットを見てください。
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

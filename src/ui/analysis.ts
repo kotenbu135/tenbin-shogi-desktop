@@ -110,6 +110,8 @@ class Slot {
   /** 候補手の枠だけ: 読んでいるエンジンと局面。human は人が指す側 */
   playerCfg: EngineConfig | null = null;
   human = false;
+  /** 考え始めた時刻（経過を刻んで出すため） */
+  startedAt = 0;
   playerTarget: Target | null = null;
   readonly root: HTMLElement;
   readonly select: HTMLSelectElement | null;
@@ -185,13 +187,32 @@ class Slot {
     this.notice.textContent = text ?? '';
   }
 
-  /** 対局の枠の見出し（「☗ 先手 · 水匠5」）と状態 */
+  /** 候補手の枠の見出し（「☗ 先手 · 水匠5」）と状態 */
   setPlayer(label: string, state: string, cfg: EngineConfig | null): void {
     const el = this.root.querySelector('.player-label');
     if (el) el.textContent = label;
-    this.name.textContent = cfg ? `${cfg.name || cfg.idName || cfg.path} · ${state}` : state;
+    this.name.replaceChildren();
+    this.name.append(cfg ? `${cfg.name || cfg.idName || cfg.path} · ${state}` : state);
+    if (this.running) {
+      // 長考のあいだ画面が止まって見えないよう、動く印と経過秒を出す
+      const dots = document.createElement('span');
+      dots.className = 'thinking-dots';
+      dots.setAttribute('aria-hidden', 'true');
+      dots.innerHTML = '<i></i><i></i><i></i>';
+      const t = document.createElement('span');
+      t.className = 'think-time';
+      this.name.append(' ', dots, ' ', t);
+      this.tickTime();
+    }
     this.name.title = cfg?.idName ?? '';
     if (!this.running) this.stats.textContent = '';
+  }
+
+  /** 考えている秒数を出す（外から 0.25 秒ごとに呼ぶ） */
+  tickTime(): void {
+    if (!this.running || !this.startedAt) return;
+    const el = this.root.querySelector('.think-time');
+    if (el) el.textContent = `${((performance.now() - this.startedAt) / 1000).toFixed(1)} 秒`;
   }
 
   paintState(): void {
@@ -438,8 +459,10 @@ export class AnalysisPanel {
     s.lines.clear();
     s.hashfull = null;
     s.running = true;
+    s.startedAt = performance.now();
     s.setPlayer(label, '思考中', cfg);
     s.paintTable(t);
+    this.startTicking();
   }
 
   playerInfo(seat: 0 | 1, info: UsiInfo): void {
@@ -453,6 +476,7 @@ export class AnalysisPanel {
     const s = this.players.get(seat);
     if (!s) return;
     s.running = false;
+    this.stopTicking();
     s.setPlayer(s.root.querySelector('.player-label')?.textContent ?? '', state, s.playerCfg);
     s.paintTable(s.playerTarget);
   }
@@ -462,6 +486,28 @@ export class AnalysisPanel {
     for (const s of this.players.values()) s.root.remove();
     this.players.clear();
     this.playEmpty.hidden = false;
+  }
+
+  /** 考えている枠があるあいだ、経過秒を刻む */
+  private ticker: ReturnType<typeof setInterval> | null = null;
+
+  private startTicking(): void {
+    if (this.ticker) return;
+    this.ticker = setInterval(() => {
+      let any = false;
+      for (const s of this.players.values()) {
+        if (!s.running) continue;
+        any = true;
+        s.tickTime();
+      }
+      if (!any) this.stopTicking();
+    }, 250);
+  }
+
+  private stopTicking(): void {
+    if ([...this.players.values()].some((s) => s.running)) return;
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
   }
 
   /** 棋譜解析の進み具合。null で消す */

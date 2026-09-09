@@ -71,6 +71,14 @@ export class KifuList {
     this.deps.onSeek(next >= n ? null : next);
   }
 
+  /**
+   * いまの手が見えるところまで送る。終局のときは右上に結果の欄が出て棋譜の高さが変わるので、
+   * 画面を描き終えてからもう一度呼ぶ（描いた直後だけだと最後の手が枠の外に残る）。
+   */
+  revealCurrent(): void {
+    this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+  }
+
   render(moves: MoveRecord[], cursor: number | null, footer?: string): void {
     this.moves = moves;
     this.cursor = cursor;
@@ -120,7 +128,7 @@ export class KifuList {
       frag.appendChild(li);
     }
     this.list.replaceChildren(frag);
-    this.list.querySelector('.current')?.scrollIntoView({ block: 'nearest' });
+    this.revealCurrent();
     this.foot.textContent = footer ?? '';
     this.foot.hidden = !footer;
     for (const b of this.nav.querySelectorAll<HTMLButtonElement>('button')) {

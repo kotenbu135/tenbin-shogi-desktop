@@ -57,9 +57,10 @@ export interface LayoutSettings {
 }
 
 /** 既定は 2 欄。候補手（検討）とグラフを同時に見られるようにする */
+/** 高さの既定は「候補 3 手ぶんがちょうど収まる」ところ（実測 246px + わずかな余裕） */
 export const DEFAULT_LAYOUT: LayoutSettings = {
   recordWidth: 320,
-  bottomHeight: 270,
+  bottomHeight: 248,
   panes: [
     { tabs: ['play', 'analysis'], active: 'play', ratio: 0.56 },
     { tabs: ['score', 'winrate'], active: 'score', ratio: 0.44 },

@@ -32,6 +32,8 @@ export interface Shape {
 
 export interface RenderOptions {
   interactive: boolean;
+  /** エンジンが考えている側（名札に動く印を出す） */
+  thinking?: Color | null;
   phase: Phase;
   dropSquares(role: OpsRole): Set<string>;
   moveDests(from: string): Set<string>;
@@ -296,8 +298,17 @@ export class Board {
     plate.classList.toggle('to-move', active);
     if (active) {
       const t = document.createElement('span');
-      t.className = 'plate-turn';
-      t.textContent = '手番';
+      // エンジンが考えているあいだは、動く印を出す（長考でも画面が止まって見えないように）
+      const thinking = o.thinking === color;
+      t.className = 'plate-turn' + (thinking ? ' thinking' : '');
+      t.textContent = thinking ? '考え中' : '手番';
+      if (thinking) {
+        const dots = document.createElement('span');
+        dots.className = 'thinking-dots';
+        dots.setAttribute('aria-hidden', 'true');
+        dots.innerHTML = '<i></i><i></i><i></i>';
+        t.append(' ', dots);
+      }
       plate.appendChild(t);
     }
     const ck = o.clocks?.[color];

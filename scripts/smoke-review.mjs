@@ -137,23 +137,25 @@ const slotCols = () => ev(() => {
   return `${document.querySelectorAll('.user-slots .analysis-slot').length} 枠 / ${cols} 列 / 読み筋の幅 ${Math.round(pv)}px`;
 });
 console.log('2 欄のとき:', await slotCols());
-await click('button[data-act="layout"]');
+// 配置の窓は「はじめに」から開く（ツールバーの配置ボタンは外した）
+const openLayout = async () => { await click('button[data-act="setup"]'); await click('.setup-dialog [data-act="layout"]'); await new Promise((r) => setTimeout(r, 150)); };
+const closeLayout = async () => { await ev(() => document.querySelector('.layout-dialog')?.close()); await new Promise((r) => setTimeout(r, 150)); };
+await openLayout();
 await click('.layout-dialog [data-preset="1"]');
-await new Promise((r) => setTimeout(r, 200));
-await ev(() => document.querySelector('.tab[data-tab="analysis"]').click());
-await new Promise((r) => setTimeout(r, 150));
+await closeLayout();
+await tab('analysis');
 console.log('1 欄にした:', await panes(), '|', await slotCols());
+await openLayout();
 await click('.layout-dialog [data-preset="3"]');
-await new Promise((r) => setTimeout(r, 200));
+await closeLayout();
 console.log('3 欄にした:', await panes(), '| 欄の数', await ev(() => document.querySelectorAll('.pane').length));
 await page.screenshot({ path: `${OUT}/review-panes.png` });
+await openLayout();
 await click('.layout-dialog [data-move="winrate:-1"]');
-await new Promise((r) => setTimeout(r, 200));
 console.log('期待勝率を左へ:', await panes());
 await click('.layout-dialog [data-act="reset"]');
-await new Promise((r) => setTimeout(r, 200));
 console.log('初期に戻した:', await panes());
-await ev(() => document.querySelector('.layout-dialog').close());
+await closeLayout();
 // タブを掴んで運ぶ（ポインタ操作。HTML5 の drag は button では始まらない版がある）
 const dragTab = async (id, to) => {
   const b = await (await page.$(`.tab[data-tab="${id}"]`)).boundingBox();
@@ -168,7 +170,8 @@ await dragTab('winrate', { x: bottom.x + 200, y: bottom.y + bottom.height / 2 })
 console.log('期待勝率を左の欄へ掴んで運んだ:', await panes());
 await dragTab('winrate', { x: bottom.x + bottom.width - 8, y: bottom.y + bottom.height / 2 });
 console.log('右の端へ落として新しい欄:', await panes(), '| 欄の数', await ev(() => document.querySelectorAll('.pane').length));
-await click('button[data-act="layout"]');
+await click('button[data-act="setup"]');
+await click('.setup-dialog [data-act="layout"]');
 await click('.layout-dialog [data-act="reset"]');
 await ev(() => document.querySelector('.layout-dialog').close());
 await tab('analysis');

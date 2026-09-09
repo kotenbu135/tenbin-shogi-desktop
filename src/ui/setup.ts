@@ -6,6 +6,7 @@
 
 import { isTauri } from '../usi/engine.ts';
 import type { Settings } from '../settings.ts';
+import { checkUpdate, currentVersion } from './update.ts';
 
 /** 案内に出す配布先。実行ファイルと評価関数は別々に配られている */
 const LINKS = [
@@ -28,6 +29,10 @@ export interface SetupDeps {
   openEngines(): void;
   /** 設定を初期に戻す */
   reset(): Promise<void>;
+  /** 下の欄の配置を選ぶ窓を開く */
+  openLayout(): void;
+  /** 状態の行に出す */
+  say(text: string, error?: boolean): void;
 }
 
 async function openUrl(url: string): Promise<void> {
@@ -49,6 +54,7 @@ export class SetupDialog {
   private readonly dialog: HTMLDialogElement;
   private enginesDir = '';
   private dataDir = '';
+  private version = '';
 
   constructor(host: HTMLElement, private readonly deps: SetupDeps) {
     this.dialog = document.createElement('dialog');
@@ -79,6 +85,14 @@ export class SetupDialog {
         case 'reset':
           if (confirm('エンジンの登録・画面の割りつけ・目盛りをすべて初期に戻します。よろしいですか')) void this.deps.reset();
           break;
+        case 'update':
+          this.dialog.close();
+          void checkUpdate(false, { say: this.deps.say });
+          break;
+        case 'layout':
+          this.dialog.close();
+          this.deps.openLayout();
+          break;
       }
     });
   }
@@ -89,7 +103,7 @@ export class SetupDialog {
     const n = s.engines.length;
     this.dialog.innerHTML = `
       <div class="dialog-body setup-body">
-        <div class="dialog-head"><h2>はじめに</h2></div>
+        <div class="dialog-head"><h2>はじめに</h2><span class="hint">${this.version ? `版 ${this.version}` : ''}</span></div>
         <p class="hint">
           このアプリはエンジンと評価関数を同梱していません。布石（1〜40手目）の評価は内蔵しているので、
           エンジンが無くても布石の検討と AI との対局はできます。41 手目からの本将棋には USI エンジンが要ります。
@@ -137,7 +151,7 @@ export class SetupDialog {
           <ul class="setup-list">
             <li>アプリ本体: Windows は「設定 → アプリ」から「天秤将棋」をアンインストール。展開しただけの版はそのフォルダを消す</li>
             <li>設定とエンジンの登録: 下のフォルダに残ります。まるごと消せば何も残りません（エンジン本体もここに置いていれば一緒に消えます）</li>
-            <li>登録し直したいだけなら「設定を初期に戻す」</li>
+            <li>登録し直したいだけなら「設定を初期に戻す」。下の欄の並びだけ戻すなら「画面の配置」→「初期に戻す」</li>
           </ul>
           <div class="dir-row">
             <span class="dir-label">データのフォルダ</span>
@@ -145,9 +159,16 @@ export class SetupDialog {
             ${this.dataDir ? `<button type="button" data-act="open-dir" data-dir="${this.dataDir}">開く</button><button type="button" class="link copy" data-act="copy" data-text="${this.dataDir}">コピー</button>` : ''}
           </div>
           <div class="setup-actions">
+            <button type="button" data-act="layout">画面の配置</button>
             <button type="button" class="danger" data-act="reset">設定を初期に戻す</button>
             <span class="hint">エンジンの登録・割りつけ・目盛りが消えます。棋譜のファイルは消えません</span>
           </div>
+        </section>
+
+        <section class="setup-step">
+          <h3>4. 更新</h3>
+          <p class="hint">起動のたびに新しい版が出ていないか見に行きます。見つかったら知らせるので、承諾したときだけ入れ替えて再起動します。</p>
+          <div class="setup-actions"><button type="button" data-act="update">更新を確認する</button></div>
         </section>
 
         <div class="dialog-actions"><button type="button" data-act="close">閉じる</button></div>
@@ -156,11 +177,12 @@ export class SetupDialog {
   }
 
   private async loadDirs(): Promise<void> {
-    if (!isTauri() || (this.enginesDir && this.dataDir)) return;
+    if (!isTauri() || (this.enginesDir && this.dataDir && this.version)) return;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       this.enginesDir = await invoke<string>('engines_dir');
       this.dataDir = await invoke<string>('data_dir');
+      this.version = await currentVersion();
     } catch {
       /* 分からなくても案内は出す */
     }

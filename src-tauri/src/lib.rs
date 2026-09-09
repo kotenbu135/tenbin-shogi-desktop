@@ -215,6 +215,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            // 自動更新はデスクトップだけ。確認と適用は画面（src/ui/update.ts）から呼ぶ
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            let _ = app;
+            Ok(())
+        })
         .manage(host.clone())
         .invoke_handler(tauri::generate_handler![
             engine_start,
