@@ -5,10 +5,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
 import { Game, rebuild, squareText, colorName, colorMark, type Mode, type ViewState, type Color } from './state/game.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
-import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
+import { BUILTIN_ID, loadSettings, saveSettings, type Settings, defaultSettings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { Layout } from './ui/layout.ts';
+import { SetupDialog } from './ui/setup.ts';
 import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel, type Target } from './ui/analysis.ts';
 import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
@@ -79,6 +80,15 @@ async function main(): Promise<void> {
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
   });
   const newGameDialog = new NewGameDialog($('dialogs'), () => settings);
+  const setupDialog = new SetupDialog($('dialogs'), {
+    settings: () => settings,
+    save: () => saveSettings(settings),
+    openEngines: () => engineDialog.open(),
+    reset: async () => {
+      await saveSettings(defaultSettings());
+      location.reload();
+    },
+  });
 
   /** id（'builtin' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
   function createThinker(id: string, processTag: string): Thinker | null {
@@ -185,6 +195,7 @@ async function main(): Promise<void> {
       analysis.beginPlayer(half, sideLabel(half), cfg, targetOf(game.view()));
     },
     multiPv: () => settings.playMultiPv,
+    canApply: (token) => game.canApply(token),
     onThinking: (seat, info) => analysis.playerInfo(halfInUse.get(seat) ?? halfOfSeat(seat), info),
     onThinkEnd: (seat, state) => analysis.endPlayer(halfInUse.get(seat) ?? halfOfSeat(seat), state),
   });
@@ -688,6 +699,7 @@ async function main(): Promise<void> {
       <button type="button" data-act="save" title="棋譜を保存">${ICON.save}<span>保存</span></button>
     </div>
     <div class="tools right">
+      <button type="button" data-act="setup" title="はじめに（エンジンの入れ方・片づけ方）">${ICON.help}<span>はじめに</span></button>
       <button type="button" data-act="console" aria-pressed="false" title="USI ログ">${ICON.terminal}<span>USI ログ</span></button>
       <button type="button" data-act="engines" title="エンジンの登録">${ICON.sliders}<span>エンジン</span></button>
       <button type="button" data-act="theme" title="明るさを切り替える">${ICON.theme}<span>テーマ</span></button>
@@ -752,6 +764,9 @@ async function main(): Promise<void> {
         consoleEl.hidden = !consoleEl.hidden;
         b.setAttribute('aria-pressed', String(!consoleEl.hidden));
         break;
+      case 'setup':
+        void setupDialog.open();
+        break;
       case 'engines':
         engineDialog.open();
         break;
@@ -804,6 +819,12 @@ async function main(): Promise<void> {
   };
 
   paintAll();
+  // 初回だけ、はじめの案内を出す（エンジンが 1 本も無いとき）
+  if (!settings.seenSetup && settings.engines.length === 0) {
+    settings.seenSetup = true;
+    void saveSettings(settings);
+    void setupDialog.open();
+  }
   builtin = await loadBuiltin((t) => usiConsole.append('sys', t));
   analysis.refreshEngineList();
   if (!isTauri()) {
@@ -833,6 +854,7 @@ const ICON = {
   terminal: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M3.5 4.5h13v11h-13zM6.5 8l2.5 2-2.5 2M10.5 12h3"/></svg>',
   sliders: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 6h12M4 10h12M4 14h12"/><circle cx="7" cy="6" r="1.6" fill="currentColor"/><circle cx="13" cy="10" r="1.6" fill="currentColor"/><circle cx="9" cy="14" r="1.6" fill="currentColor"/></svg>',
   layout: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M2.5 3.5h15v13h-15zM2.5 8h15M9 8v8.5M14 8v8.5"/></svg>',
+  help: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="7.5"/><path d="M7.8 7.6a2.3 2.3 0 1 1 2.6 2.6v1.4"/><circle cx="10.2" cy="14.4" r="0.9" fill="currentColor" stroke="none"/></svg>',
   theme: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="5.5"/><path d="M10 4.5v11A5.5 5.5 0 0 0 10 4.5z" fill="currentColor"/></svg>',
 };
 

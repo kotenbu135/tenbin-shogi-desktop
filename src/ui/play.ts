@@ -31,6 +31,8 @@ export interface PlayDeps {
   onThinkEnd(seat: 0 | 1, state: string): void;
   /** 対局中のエンジンに送る候補数（MultiPV） */
   multiPv(): number;
+  /** その手を今の局面に指せるか */
+  canApply(token: string): boolean;
 }
 
 /** 画面が 1 度描かれるのを待つ。描かれない場（背景のタブなど）でも 60ms で戻る */
@@ -212,11 +214,26 @@ export class MatchDriver {
     this.pendingKey = key;
     const gen = this.gen;
     try {
-      const token = await this.think(cur.seat, cur.spec);
+      let token = await this.think(cur.seat, cur.spec);
       if (gen !== this.gen || !this.deps.live()) return;
       if (this.pendingKey !== key) return;
+      // エンジンが今の局面で指せない手を返したら、1 度だけ聞き直す。
+      // 前の探索の bestmove を拾ってしまう筋が残っており、そこで対局が死んでいた
+      if (token && !this.deps.canApply(token)) {
+        this.deps.onLog(this.names[cur.seat] || 'エンジン', 'sys', `指せない手が返った: ${token} · 局面 ${this.deps.game().positionCommand()}`);
+        this.deps.say('エンジンが指せない手を返しました。もう一度聞いています…');
+        token = await this.think(cur.seat, cur.spec);
+        if (gen !== this.gen || !this.deps.live() || this.pendingKey !== key) return;
+      }
       this.pendingKey = null;
       this.endThinking('指した');
+      if (token && !this.deps.canApply(token)) {
+        this.deps.onLog(this.names[cur.seat] || 'エンジン', 'sys', `2 度とも指せない手だった: ${token}`);
+        this.endThinking('止まった');
+        this.deps.say(`エンジンが指せない手（${token}）を返しました。対局を止めます。「待った」で戻すか、新しい対局を始めてください`, true);
+        void this.pause();
+        return;
+      }
       if (token) this.deps.apply(token);
     } catch (e) {
       if (gen !== this.gen) return;

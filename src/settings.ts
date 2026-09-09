@@ -27,6 +27,8 @@ export interface Settings {
   kifuAnalysisSec: number;
   /** 画面の割りつけ（仕切りの位置と、下の欄で開いているタブ） */
   layout: LayoutSettings;
+  /** はじめの案内を見たか（初回だけ自動で出す） */
+  seenSetup: boolean;
 }
 
 /** 下の欄に置けるもの */
@@ -75,6 +77,7 @@ export function defaultSettings(): Settings {
     builtinMethod: 'value',
     kifuAnalysisSec: 2,
     layout: { ...DEFAULT_LAYOUT },
+    seenSetup: false,
   };
 }
 
@@ -144,6 +147,7 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
     kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,
     layout: mergeLayout(saved.layout),
+    seenSetup: saved.seenSetup === true,
   };
   if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
   if (s.fusekiEngineId !== BUILTIN_ID && !engines.some((e) => e.id === s.fusekiEngineId)) s.fusekiEngineId = BUILTIN_ID;

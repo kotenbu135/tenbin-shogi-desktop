@@ -16,8 +16,21 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 page.on('dialog', (d) => d.accept());
 await page.goto('http://localhost:4173/', { waitUntil: 'networkidle0' });
+// はじめての起動（設定が空）では、はじめの案内が出る
+await page.evaluate(() => localStorage.removeItem('settings'));
+await page.reload({ waitUntil: 'networkidle0' });
+await page.waitForFunction(() => window.tenbin?.builtin?.(), { timeout: 30000 });
+await new Promise((r) => setTimeout(r, 400));
+console.log('はじめての起動:', await page.evaluate(() => {
+  const d = document.querySelector('.setup-dialog');
+  if (!d?.open) return '案内が出ない';
+  const links = [...d.querySelectorAll('[data-act="link"]')].map((b) => b.dataset.url).join(' / ');
+  const reset = !!d.querySelector('[data-act="reset"]');
+  d.close();
+  return `案内が出た · 配布先 ${links} · 初期化 ${reset}`;
+}));
 // 古い形の設定（タブ 1 枚を覚えるだけ）から読み直せるか。実機の settings.json はこの形で残っている
-await page.evaluate(() => localStorage.setItem('settings', JSON.stringify({ layout: { recordWidth: 300, bottomHeight: 250, tab: 'winrate' } })));
+await page.evaluate(() => localStorage.setItem('settings', JSON.stringify({ seenSetup: true, layout: { recordWidth: 300, bottomHeight: 250, tab: 'winrate' } })));
 await page.reload({ waitUntil: 'networkidle0' });
 await page.waitForFunction(() => window.tenbin?.builtin?.(), { timeout: 30000 });
 const ev = (fn, ...args) => page.evaluate(fn, ...args);

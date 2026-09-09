@@ -278,6 +278,21 @@ export class Game {
     this.pos = r.value;
   }
 
+  /** その手を今の局面に指せるか（エンジンの返した手を当てる前の確認） */
+  canApply(token: string): boolean {
+    if (token === 'resign' || token === 'timeout' || token.startsWith('choose:')) return true;
+    if (this.pos) {
+      const md = parseUsi(token);
+      return !!md && this.pos.isLegal(md);
+    }
+    if (this.over) return false;
+    try {
+      return this.legalDrops().some((d) => d.usi === token);
+    } catch {
+      return false;
+    }
+  }
+
   private applyNormal(token: string): MoveRecord {
     const pos = this.pos!;
     const md: MoveOrDrop | undefined = parseUsi(token);

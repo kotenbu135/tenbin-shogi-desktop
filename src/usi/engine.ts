@@ -191,9 +191,13 @@ export class UsiEngine implements Thinker {
     return this.options.some((o) => o.name === name);
   }
 
+  /** いま bestmove を 1 つ待っているか（探索は 1 つの処理につき 1 本だけ） */
+  private expecting = false;
+
   private receive(p: EnginePayload): void {
     if (p.kind === 'exit') {
       this.log('sys', '終了した');
+      this.expecting = false;
       this.failWaiters(new Error('エンジンが終了した'));
       receivers.delete(this.processId);
       this.setState('stopped');
@@ -215,6 +219,15 @@ export class UsiEngine implements Thinker {
       if (info && (info.scoreCp !== undefined || info.scoreMate !== undefined || info.winrate !== undefined || info.string !== undefined)) {
         this.onInfo?.(info);
       }
+    }
+    if (line.startsWith('bestmove')) {
+      // 走らせていないのに来た bestmove は捨てる。止めたあとのエンジンが余分に返すことがあり、
+      // それを次の go の答えとして拾うと、1 手前の局面の手を指してしまう
+      if (!this.expecting) {
+        this.log('sys', `余計な bestmove を捨てた: ${line}`);
+        return;
+      }
+      this.expecting = false;
     }
     for (const w of this.waiters.slice()) {
       if (w.match(line)) {
@@ -269,6 +282,7 @@ export class UsiEngine implements Thinker {
     this.setState('thinking');
     this.send(positionCmd);
     this.send('go infinite');
+    this.expecting = true;
   }
 
   /** 1手指させて bestmove を待つ。途中で stop() されたときも、そのとき返った bestmove で解決する。 */
@@ -280,6 +294,7 @@ export class UsiEngine implements Thinker {
     const p = this.waitFor((l) => l.startsWith('bestmove'), 3_600_000);
     this.send(positionCmd);
     this.send(`go ${goArgs}`.trim());
+    this.expecting = true;
     try {
       const line = await p;
       const bm = parseBestmove(line);
@@ -313,6 +328,7 @@ export class UsiEngine implements Thinker {
 
   async quit(): Promise<void> {
     this.onInfo = null;
+    this.expecting = false;
     receivers.delete(this.processId);
     this.failWaiters(new Error('エンジンを止めた'));
     if (isTauri()) {

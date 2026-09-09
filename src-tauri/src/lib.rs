@@ -102,6 +102,16 @@ fn write_text_file(path: String, text: String) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("書けない: {path} ({e})"))
 }
 
+/// アプリのデータフォルダ（設定とエンジンの置き場所）。案内とアンインストールの説明に使う。
+#[tauri::command]
+fn data_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("データフォルダが分からない: {e}"))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 /// エンジンのフォルダ（アプリのデータフォルダの engines/）。無ければ作る。利用者はここにエンジンを置く。
 #[tauri::command]
 fn engines_dir(app: AppHandle) -> Result<String, String> {
@@ -216,6 +226,7 @@ pub fn run() {
             read_text_file,
             write_text_file,
             engines_dir,
+            data_dir,
             scan_executables,
             open_path,
             cpu_info,
