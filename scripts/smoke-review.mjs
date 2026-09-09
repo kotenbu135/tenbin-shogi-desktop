@@ -32,9 +32,9 @@ console.log('割りつけ:', await ev(() => {
   const r = (s) => { const b = document.querySelector(s)?.getBoundingClientRect(); return b ? `${Math.round(b.width)}x${Math.round(b.height)}` : '無し'; };
   return `盤 ${r('.board-col')} / 棋譜 ${r('.record-pane')} / 下の欄 ${document.querySelectorAll('.pane').length} 枠`;
 }));
-console.log('欄とタブ（古い設定から）:', await panes(), '| 検討とグラフが同時に見える:', await ev(() => {
+console.log('欄とタブ（古い設定から）:', await panes(), '| 候補手とグラフが同時に見える:', await ev(() => {
   const vis = (s) => { const e = document.querySelector(s); return !!e && !e.hidden && e.clientWidth > 0; };
-  return vis('#analysis') && (vis('#graph-score') || vis('#graph-winrate'));
+  return vis('#play') && (vis('#graph-score') || vis('#graph-winrate'));
 }));
 
 // 1. 名札: 時計つきで手番でない側の名前が 1 行に収まる（縦に折れない）
@@ -57,7 +57,7 @@ await ev(() => window.tenbin.play({
   timeControl: null,
 }));
 await page.waitForFunction(() => document.querySelectorAll('.analysis-slot.player').length >= 1 && window.tenbin.game().moves.length >= 10, { timeout: 60000 });
-console.log('対局の枠:', await ev(() => [...document.querySelectorAll('.analysis-slot.player')].map((s) => `${s.querySelector('.player-label').textContent} / ${s.querySelector('.engine-name').textContent} / ${s.querySelectorAll('.cand').length}候補`).join(' || ')));
+console.log('候補手の欄:', await ev(() => [...document.querySelectorAll('.play-slots .analysis-slot')].map((s) => `${s.querySelector('.player-label').textContent} / ${s.querySelector('.engine-name').textContent} / ${s.querySelectorAll('.cand').length}候補`).join(' || ')), '| 左右:', await ev(() => getComputedStyle(document.querySelector('.play-slots')).gridTemplateColumns));
 console.log('グラフ（途中）:', `対局 ${await playPoints()} 点 / 検討 ${await ev(() => window.tenbin.evals().filter((e) => e.source === 'analysis').length)} 点`, '| 天秤の図:', await ev(() => !!document.querySelector('.graph .scale')));
 await page.screenshot({ path: `${OUT}/review-play.png` });
 await page.waitForFunction(() => window.tenbin.game().moves.length >= 41, { timeout: 120000 });
@@ -65,6 +65,7 @@ console.log('布石まで:', await status(), '|', ((Date.now() - t0) / 1000).toF
 
 // 3. 本将棋を人が投了 → 終局後も検討できる（内蔵は本将棋を評価しないので、40 手目の局面に戻って検討）
 await click('button[data-act="resign"]');
+await tab('analysis');
 console.log('終局:', await status(), '| 右上:', await ev(() => document.querySelector('.result')?.textContent));
 await click('button[data-act="toggle"]');
 await new Promise((r) => setTimeout(r, 800));
@@ -126,6 +127,8 @@ console.log('2 欄のとき:', await slotCols());
 await click('button[data-act="layout"]');
 await click('.layout-dialog [data-preset="1"]');
 await new Promise((r) => setTimeout(r, 200));
+await ev(() => document.querySelector('.tab[data-tab="analysis"]').click());
+await new Promise((r) => setTimeout(r, 150));
 console.log('1 欄にした:', await panes(), '|', await slotCols());
 await click('.layout-dialog [data-preset="3"]');
 await new Promise((r) => setTimeout(r, 200));
@@ -138,6 +141,7 @@ await click('.layout-dialog [data-act="reset"]');
 await new Promise((r) => setTimeout(r, 200));
 console.log('初期に戻した:', await panes());
 await ev(() => document.querySelector('.layout-dialog').close());
+await tab('analysis');
 for (const b of await page.$$('.user-slots .aslot-remove')) { await b.click(); await new Promise((r) => setTimeout(r, 80)); }
 
 // 8. 窓を小さくしても盤が潰れず、横に溢れない

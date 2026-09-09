@@ -252,15 +252,17 @@ export class Board {
     const toMove = s.turn === color;
     for (const role of order) {
       const n = hand.get(role) ?? 0;
+      // 持っていない駒は駒台に出さない（実際の駒台と同じ）。両玉を置く間は玉だけ。
+      // 局面編集だけは全種類を並べる（無い駒を盤へ置くための台なので）
+      if (!o.edit && (n === 0 || (o.phase === 'kings' && role !== 'king'))) continue;
       const slot = document.createElement('button');
       slot.type = 'button';
       slot.className = 'slot';
       slot.dataset.role = role;
       slot.dataset.n = String(n);
-      slot.disabled = o.edit ? false : !o.interactive || !toMove || n === 0;
+      slot.disabled = o.edit ? false : !o.interactive || !toMove;
       slot.classList.toggle('selected', this.selection?.kind === 'hand' && this.selection.color === color && this.selection.role === role);
-      slot.classList.toggle('dim', n === 0);
-      if (o.phase === 'kings' && !o.edit) slot.classList.toggle('faded', role !== 'king');
+      slot.classList.toggle('dim', o.edit && n === 0);
       slot.appendChild(pieceEl({ color, role }, this.orientation));
       if (n >= 2) {
         const c = document.createElement('span');

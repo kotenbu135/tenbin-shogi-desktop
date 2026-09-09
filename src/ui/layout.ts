@@ -13,7 +13,7 @@ import { ALL_TABS, defaultPanes, type LayoutSettings, type PaneSettings, type Ta
 
 export type { TabId };
 
-export const TAB_LABEL: Record<TabId, string> = { analysis: '検討', score: '評価値', winrate: '期待勝率' };
+export const TAB_LABEL: Record<TabId, string> = { play: '候補手', analysis: '検討', score: '評価値', winrate: '期待勝率' };
 
 export interface LayoutDeps {
   layout(): LayoutSettings;
@@ -179,13 +179,13 @@ export class Layout {
     const l = this.deps.layout();
     l.panes =
       n === 1
-        ? [{ tabs: [...ALL_TABS], active: 'analysis', ratio: 1 }]
+        ? [{ tabs: [...ALL_TABS], active: 'play', ratio: 1 }]
         : n === 2
           ? defaultPanes()
           : [
-              { tabs: ['analysis'], active: 'analysis', ratio: 0.5 },
-              { tabs: ['score'], active: 'score', ratio: 0.25 },
-              { tabs: ['winrate'], active: 'winrate', ratio: 0.25 },
+              { tabs: ['play', 'analysis'], active: 'play', ratio: 0.4 },
+              { tabs: ['score'], active: 'score', ratio: 0.3 },
+              { tabs: ['winrate'], active: 'winrate', ratio: 0.3 },
             ];
     this.commit();
   }

@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     return e === null ? null : { p: e.p, cp: e.cp, approx: e.approx };
   }
 
-  const analysis = new AnalysisPanel($('analysis'), {
+  const analysis = new AnalysisPanel($('analysis'), $('play'), {
     settings: () => settings,
     save: () => saveSettings(settings),
     createThinker,
@@ -173,16 +173,49 @@ async function main(): Promise<void> {
     createThinker,
     say: (text, error) => say(text, error),
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
-    onThinkStart: (seat, color, cfg) => {
-      // 先後が決まる前（両玉を置く間）は席の名前で、決まってからは先後の印と名前で
-      const label = game.mode === 'tenbin' && !game.chosenColor
-        ? `${driver.seatName(seat) || (seat === 0 ? '席 A' : '席 B')}（玉を置く）`
-        : `${colorMark(color)} ${names()[color] || colorName(color)}`;
-      analysis.beginPlayer(seat, label, cfg, targetOf(game.view()));
+    onThinkStart: (seat, _color, cfg) => {
+      const half = halfOfSeat(seat);
+      halfInUse.set(seat, half);
+      analysis.beginPlayer(half, sideLabel(half), cfg, targetOf(game.view()));
     },
-    onThinking: (seat, info) => analysis.playerInfo(seat, info),
-    onThinkEnd: (seat, state) => analysis.endPlayer(seat, state),
+    onThinking: (seat, info) => analysis.playerInfo(halfInUse.get(seat) ?? halfOfSeat(seat), info),
+    onThinkEnd: (seat, state) => analysis.endPlayer(halfInUse.get(seat) ?? halfOfSeat(seat), state),
   });
+
+  /** 候補手の欄の左右。0 が先手側、1 が後手側（先後が決まる前は席の順） */
+  const halfInUse = new Map<0 | 1, 0 | 1>();
+
+  function beforeChoice(): boolean {
+    return game.mode === 'tenbin' && !game.chosenColor;
+  }
+
+  function halfOfSeat(seat: 0 | 1): 0 | 1 {
+    if (beforeChoice()) return seat;
+    return driver.seatOfColor('sente') === seat ? 0 : 1;
+  }
+
+  function sideLabel(half: 0 | 1): string {
+    if (beforeChoice()) {
+      const seat = half;
+      return `${driver.seatName(seat) || (seat === 0 ? '席 A' : '席 B')}（${seat === 0 ? '玉を置く' : '先後を選ぶ'}）`;
+    }
+    const color: Color = half === 0 ? 'sente' : 'gote';
+    return `${colorMark(color)} ${names()[color] || colorName(color)}`;
+  }
+
+  /** 候補手の欄は対局のあいだ**常に左右 2 つ**。人の側もそのまま置く（割りつけを動かさない） */
+  function paintPlaySides(): void {
+    if (!driver.playing) {
+      analysis.setPlayers(null);
+      return;
+    }
+    analysis.setPlayers(
+      ([0, 1] as const).map((half) => {
+        const seat = beforeChoice() ? half : driver.seatOfColor(half === 0 ? 'sente' : 'gote');
+        return { label: sideLabel(half), human: driver.humanAt(seat) };
+      }),
+    );
+  }
 
   // グラフは 2 つ立てる。別々の欄に置いて同時に見られるようにするため、種類は作るときに決める
   const graphs = [new TenbinGraph(scoreEl, 'score'), new TenbinGraph(winrateEl, 'winrate')] as const;
@@ -198,7 +231,7 @@ async function main(): Promise<void> {
     paintAll();
   };
   for (const g of graphs) g.onSeek = seek;
-  const layout = new Layout($('main'), $('bottom'), { analysis: $('analysis'), score: scoreEl, winrate: winrateEl }, {
+  const layout = new Layout($('main'), $('bottom'), { play: $('play'), analysis: $('analysis'), score: scoreEl, winrate: winrateEl }, {
     layout: () => settings.layout,
     save: () => void saveSettings(settings),
     onChange: () => paintGraph(null),
@@ -449,6 +482,7 @@ async function main(): Promise<void> {
     paintBoard();
     kifu.render(game.moves, cursor, cursor === null ? undefined : `${v.ply}手目の局面を表示中`);
     paintSide(v);
+    paintPlaySides();
     paintGraph(null);
     say(cursor === null ? phaseText(v) : `${phaseText(v)} · 過去の局面（→ か End で最新へ）`);
     void analysis.setTarget(targetOf(v));

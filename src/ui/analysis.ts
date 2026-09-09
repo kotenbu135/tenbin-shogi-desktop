@@ -100,8 +100,9 @@ class Slot {
   lines = new Map<number, AnalysisLine>();
   hashfull: number | null = null;
   running = false;
-  /** 対局の枠だけ: 読んでいるエンジンと局面 */
+  /** 候補手の枠だけ: 読んでいるエンジンと局面。human は人が指す側 */
   playerCfg: EngineConfig | null = null;
+  human = false;
   playerTarget: Target | null = null;
   readonly root: HTMLElement;
   readonly select: HTMLSelectElement | null;
@@ -236,7 +237,9 @@ class Slot {
   }
 
   paintTable(t: Target | null): void {
-    const lines = this.sortedLines();
+    // 出す行は「候補」の数まで。MultiPV を持たないエンジン（内蔵の布石評価は 16 手ぶん出す）でも
+    // 表が伸びて欄がスクロール前提にならないようにする
+    const lines = this.sortedLines().slice(0, this.panel.maxLines);
     const top = lines[0];
     if (top && t && t.stage !== 'normal') {
       // 布石中の数字は価値ネットの推定。深さやノード数に意味は無いので、代わりに当てにできる度合いを出す。
@@ -256,7 +259,9 @@ class Slot {
       this.table.innerHTML = this.running
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
         : this.player
-          ? '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
+          ? this.human
+            ? '<div class="analysis-empty">人が指す側です。</div>'
+            : '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
           : '<div class="analysis-empty">検討を始めると、候補手・評価値・期待勝率がここに並びます。</div>';
       return;
     }
@@ -310,10 +315,14 @@ export class AnalysisPanel {
   private readonly multipv: HTMLInputElement;
   private readonly slotsEl: HTMLElement;
   private readonly playersEl: HTMLElement;
+  private readonly playEmpty: HTMLElement;
   private readonly notice: HTMLElement;
   private readonly progress: HTMLElement;
 
-  constructor(private readonly root: HTMLElement, private readonly deps: AnalysisDeps) {
+  constructor(private readonly root: HTMLElement, private readonly playRoot: HTMLElement, private readonly deps: AnalysisDeps) {
+    playRoot.innerHTML = '<div class="play-slots"></div><div class="play-empty">対局を始めると、両方の側の候補手がここに並びます。</div>';
+    this.playersEl = playRoot.querySelector('.play-slots')!;
+    this.playEmpty = playRoot.querySelector('.play-empty')!;
     root.innerHTML = `
       <div class="analysis-head">
         <button type="button" class="primary" data-act="toggle">検討を始める</button>
@@ -323,13 +332,12 @@ export class AnalysisPanel {
       </div>
       <div class="analysis-notice panel-notice" hidden></div>
       <div class="analysis-progress" hidden></div>
-      <div class="slots"><div class="player-slots"></div><div class="user-slots"></div></div>`;
+      <div class="slots"><div class="user-slots"></div></div>`;
     this.toggle = root.querySelector('[data-act="toggle"]')!;
     this.addBtn = root.querySelector('[data-act="add"]')!;
     this.kifuBtn = root.querySelector('[data-act="kifu"]')!;
     this.multipv = root.querySelector('.multipv input')!;
     this.slotsEl = root.querySelector('.user-slots')!;
-    this.playersEl = root.querySelector('.player-slots')!;
     this.notice = root.querySelector('.panel-notice')!;
     this.progress = root.querySelector('.analysis-progress')!;
     this.toggle.addEventListener('click', () => {
@@ -359,19 +367,50 @@ export class AnalysisPanel {
     return this.deps.pvText(usis, t);
   }
 
-  // ---- 対局の枠 ----
+  /** 表に出す候補の数 */
+  get maxLines(): number {
+    return this.deps.settings().analysisMultiPv;
+  }
 
-  /** 手番のエンジンが考え始めた。席ごとに枠を 1 つ持ち、前の読みは消す */
-  beginPlayer(seat: 0 | 1, label: string, cfg: EngineConfig, t: Target): void {
+  // ---- 候補手の欄（対局中） ----
+
+  /**
+   * 対局の顔ぶれを置く。**片方が人でも枠は 2 つ**（左が先手、右が後手）で、
+   * 半分ずつの割りつけは対局のあいだ変わらない。人の側は「人が指します」と出す。
+   */
+  setPlayers(sides: { label: string; human: boolean }[] | null): void {
+    this.playEmpty.hidden = sides !== null;
+    if (!sides) {
+      this.clearPlayers();
+      return;
+    }
+    for (const seat of [0, 1] as const) {
+      const side = sides[seat];
+      if (!side) continue;
+      const s = this.playerSlot(seat);
+      s.human = side.human;
+      if (!s.running) s.setPlayer(side.label, side.human ? '人が指します' : s.playerCfg ? '待機' : 'エンジンが考えます', s.playerCfg);
+      if (!s.running) s.paintTable(s.playerTarget);
+    }
+  }
+
+  private playerSlot(seat: 0 | 1): Slot {
     let s = this.players.get(seat);
     if (!s) {
       s = new Slot(seat, this, true);
       this.players.set(seat, s);
-      // 席の順に並べる
+      // 先手（席 0）が左、後手（席 1）が右
       const other = this.players.get(seat === 0 ? 1 : 0);
       if (seat === 0 && other) this.playersEl.insertBefore(s.root, other.root);
       else this.playersEl.appendChild(s.root);
     }
+    return s;
+  }
+
+  /** 手番のエンジンが考え始めた。前の読みは消す */
+  beginPlayer(seat: 0 | 1, label: string, cfg: EngineConfig, t: Target): void {
+    this.playEmpty.hidden = true;
+    const s = this.playerSlot(seat);
     s.playerCfg = cfg;
     s.playerTarget = t;
     s.lines.clear();
@@ -396,10 +435,11 @@ export class AnalysisPanel {
     s.paintTable(s.playerTarget);
   }
 
-  /** 対局が変わった。対局の枠を全部消す */
+  /** 対局が変わった。候補手の枠を全部消す */
   clearPlayers(): void {
     for (const s of this.players.values()) s.root.remove();
     this.players.clear();
+    this.playEmpty.hidden = false;
   }
 
   /** 棋譜解析の進み具合。null で消す */

@@ -46,6 +46,25 @@ export class MatchDriver {
     return this.seats !== null && this.seats.some((s) => s.type === 'engine');
   }
 
+  /** 対局の顔ぶれが決まっているか（人同士でも true） */
+  get playing(): boolean {
+    return this.seats !== null;
+  }
+
+  /** 両方の側がエンジンか（人に手を先に見せる心配が無い） */
+  get allEngines(): boolean {
+    return this.seats !== null && this.seats.every((s) => s.type === 'engine');
+  }
+
+  /** その席の、いまの段階の指し手を人が入れるか */
+  humanAt(seat: 0 | 1): boolean {
+    const spec = this.seats?.[seat];
+    if (!spec) return true;
+    if (spec.type === 'human') return true;
+    // 本将棋のエンジンを指定していない席は、41 手目から人が指す
+    return this.deps.game().phase === 'normal' ? !spec.normalId : false;
+  }
+
   /** 新しい対局が始まったら呼ぶ（人同士でも呼んでよい） */
   async start(choice: NewGameChoice): Promise<void> {
     this.gen++;

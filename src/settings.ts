@@ -28,9 +28,12 @@ export interface Settings {
 }
 
 /** 下の欄に置けるもの */
-export type TabId = 'analysis' | 'score' | 'winrate';
+export type TabId = 'play' | 'analysis' | 'score' | 'winrate';
 
-export const ALL_TABS: TabId[] = ['analysis', 'score', 'winrate'];
+export const ALL_TABS: TabId[] = ['play', 'analysis', 'score', 'winrate'];
+
+/** 欄が足りないときに寄せる相手（候補手は検討の隣、評価値は期待勝率の隣） */
+const NEIGHBOUR: Record<TabId, TabId> = { play: 'analysis', analysis: 'play', score: 'winrate', winrate: 'score' };
 
 /** 下の欄の 1 つ。タブを何枚か持ち、そのうち 1 枚を開いている */
 export interface PaneSettings {
@@ -54,7 +57,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   recordWidth: 320,
   bottomHeight: 270,
   panes: [
-    { tabs: ['analysis'], active: 'analysis', ratio: 0.56 },
+    { tabs: ['play', 'analysis'], active: 'play', ratio: 0.56 },
     { tabs: ['score', 'winrate'], active: 'score', ratio: 0.44 },
   ],
 };
@@ -175,8 +178,12 @@ function mergeLayout(raw: (Partial<LayoutSettings> & { tab?: string }) | undefin
     if (legacy) for (const p of panes) if (p.tabs.includes(legacy)) p.active = legacy;
     for (const p of panes) for (const t of p.tabs) seen.add(t);
   }
-  // 知らないうちに増えたタブは最後の欄へ
-  for (const t of ALL_TABS) if (!seen.has(t)) panes[panes.length - 1]!.tabs.push(t);
+  // 版を上げて増えたタブは、相方の居る欄へ（無ければ最後の欄へ）
+  for (const t of ALL_TABS) {
+    if (seen.has(t)) continue;
+    const p = panes.find((q) => q.tabs.includes(NEIGHBOUR[t])) ?? panes[panes.length - 1]!;
+    p.tabs.push(t);
+  }
   const sum = panes.reduce((a, p) => a + p.ratio, 0) || 1;
   for (const p of panes) p.ratio = p.ratio / sum;
   return {
