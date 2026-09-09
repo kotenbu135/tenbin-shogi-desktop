@@ -400,9 +400,9 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .analysis-head .multipv input { width: 4em; }
 /* 枠は幅に応じて横に並べる。狭ければ 1 列に落ちる */
 .slots { overflow: auto; align-content: start; }
-.player-slots, .user-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
-.analysis-slot { min-width: 0; border-top: 1px solid var(--rule); }
-.analysis-slot + .analysis-slot { border-left: 1px solid var(--rule); }
+/* 1360px の窓（既定）で 2 列。440px だと 3 列のままで読み筋が潰れる */
+.player-slots, .user-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
+.analysis-slot { min-width: 0; border-top: 1px solid var(--rule); border-right: 1px solid var(--rule); }
 .aslot-head { display: flex; gap: 8px; align-items: center; padding: 6px 12px 0; }
 .aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .aslot-head .aslot-remove { flex: none; }

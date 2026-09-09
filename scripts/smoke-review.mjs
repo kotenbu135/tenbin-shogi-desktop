@@ -104,7 +104,19 @@ console.log('グラフを押した:', await status());
 await page.keyboard.press('End');
 console.log('最新へ戻った:', await status(), '| 手番の整合:', await ev(() => { const g = window.tenbin.game(); const last = g.moves.filter((m) => m.color).at(-1); return `最後に指した ${last.color} → 手番 ${g.turn}`; }));
 
-// 7. 窓を小さくしても盤が潰れず、横に溢れない
+// 7. 枠を 3 本にしても、既定の窓（1360px）で列が潰れない（2 列に落ちる）
+await tab('analysis');
+await click('.analysis-head [data-act="add"]');
+await click('.analysis-head [data-act="add"]');
+await new Promise((r) => setTimeout(r, 200));
+console.log('枠を 3 本:', await ev(() => {
+  const cols = getComputedStyle(document.querySelector('.user-slots')).gridTemplateColumns.split(' ').length;
+  const pv = document.querySelector('.user-slots .c-pv')?.getBoundingClientRect().width ?? 0;
+  return `${document.querySelectorAll('.user-slots .analysis-slot').length} 枠 / ${cols} 列 / 読み筋の幅 ${Math.round(pv)}px`;
+}));
+for (const b of await page.$$('.user-slots .aslot-remove')) { await b.click(); await new Promise((r) => setTimeout(r, 80)); }
+
+// 8. 窓を小さくしても盤が潰れず、横に溢れない
 await page.setViewport({ width: 1024, height: 680 });
 await new Promise((r) => setTimeout(r, 300));
 console.log('狭い窓:', await ev(() => {

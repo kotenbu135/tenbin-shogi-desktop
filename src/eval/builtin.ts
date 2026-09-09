@@ -14,7 +14,7 @@ import * as ort from 'onnxruntime-web/wasm';
 import { BLACK, FEATURE_PLANES, Fuseki, type Drop, type FusekiColor } from '../rules/fuseki.ts';
 import type { EngineConfig, EngineState, LogDirection, Thinker } from '../usi/engine.ts';
 import type { Bestmove, UsiInfo } from '../usi/parse.ts';
-import { pToCp, type EvalScale } from '../usi/evalscale.ts';
+import type { EvalScale } from '../usi/evalscale.ts';
 
 export type BuiltinMethod = 'value' | 'twoply';
 const CANDIDATES = 16;

@@ -539,7 +539,6 @@ export class AnalysisPanel {
         s.showNotice(why);
         s.lines.clear();
         s.hashfull = null;
-    s.hashfull = null;
         s.paintTable(t);
         s.paintState();
         return;
@@ -547,7 +546,7 @@ export class AnalysisPanel {
       s.showNotice(null);
       s.running = true;
       s.lines.clear();
-    s.hashfull = null;
+      s.hashfull = null;
       s.paintTable(t);
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', st.analysisMultiPv);
       const primary = this.slots[0] === s;
