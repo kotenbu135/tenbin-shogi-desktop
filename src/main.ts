@@ -240,8 +240,16 @@ async function main(): Promise<void> {
     return `${colorMark(color)} ${names()[color] || colorName(color)}`;
   }
 
+  /** 先後が決まると席と左右の対応が入れ替わる。前の読みは別の人のものになるので消す */
+  let lastChosen: Color | null = null;
+
   /** 候補手の欄は対局のあいだ**常に左右 2 つ**。人の側もそのまま置く（割りつけを動かさない） */
   function paintPlaySides(): void {
+    const chosen = game.mode === 'tenbin' ? game.chosenColor : null;
+    if (chosen !== lastChosen) {
+      lastChosen = chosen;
+      analysis.clearPlayers();
+    }
     if (!driver.playing) {
       analysis.setPlayers(null);
       return;

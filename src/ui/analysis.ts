@@ -289,8 +289,9 @@ class Slot {
       this.table.innerHTML = this.running
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
         : this.player
-          ? this.human
-            ? '<div class="analysis-empty">人が指します。</div>'
+          ? // 人の側は見出しに「人が指します」と出ているので、ここでは繰り返さない
+            this.human
+            ? ''
             : '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
           : '<div class="analysis-empty">検討を始めると、候補手・評価値・期待勝率がここに並びます。</div>';
       return;
@@ -438,7 +439,8 @@ export class AnalysisPanel {
       if (!side) continue;
       const s = this.playerSlot(seat);
       s.human = side.human;
-      if (!s.running) s.setPlayer(side.label, side.human ? '人が指します' : s.playerCfg ? '待機' : 'エンジンが考えます', s.playerCfg);
+      // 人が指す側にエンジン名は出さない（布石だけエンジンに任せた席で名前が残らないように）
+      if (!s.running) s.setPlayer(side.label, side.human ? '人が指します' : s.playerCfg ? '待機' : 'エンジンが考えます', side.human ? null : s.playerCfg);
       if (!s.running) s.paintTable(s.playerTarget);
     }
   }

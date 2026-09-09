@@ -80,7 +80,7 @@ export class Layout {
       const bar = document.createElement('div');
       bar.className = 'tabbar';
       bar.setAttribute('role', 'tablist');
-      bar.title = 'タブは掴んで別の欄へ移せます（右押しで配置の窓）';
+      bar.title = 'タブは掴んで別の欄へ移せます（右クリックで配置の窓）';
       bar.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         this.openMenu(document.getElementById('dialogs') ?? document.body);
@@ -427,7 +427,7 @@ export class Layout {
           </div>
           <ul class="tab-places"></ul>
           <div class="dialog-actions">
-            <button type="button" data-act="reset">初期に戻す</button>
+            <button type="button" data-act="reset">既定の配置に戻す</button>
             <button type="submit">閉じる</button>
           </div>
         </form>`;
