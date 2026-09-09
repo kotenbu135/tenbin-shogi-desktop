@@ -41,6 +41,8 @@ export interface AnalysisDeps {
   openEngineSettings(): void;
   /** 「棋譜解析」を押した */
   onKifuAnalysis(): void;
+  /** 利用者が「検討を始める」を押した（対局中なら止めて、盤を自分で動かせるようにする） */
+  onStartAnalysis(): void;
   /** 読み筋（USI）を、その局面を起点に符号の列にする */
   pvText(usis: string[], t: Target): string[];
   /** id（'builtin' か登録 id）から思考するものを作る。無ければ null */
@@ -383,8 +385,12 @@ export class AnalysisPanel {
     this.notice = root.querySelector('.panel-notice')!;
     this.progress = root.querySelector('.analysis-progress')!;
     this.toggle.addEventListener('click', () => {
-      if (this.running) void this.stop();
-      else void this.start();
+      if (this.running) {
+        void this.stop();
+        return;
+      }
+      this.deps.onStartAnalysis();
+      void this.start();
     });
     this.addBtn.addEventListener('click', () => void this.addSlot(AUTO));
     this.kifuBtn.addEventListener('click', () => this.deps.onKifuAnalysis());

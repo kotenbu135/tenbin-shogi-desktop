@@ -8,6 +8,9 @@ import type { Mode } from '../state/game.ts';
 import type { TimeControl } from '../state/clock.ts';
 import { BUILTIN_ID, type Settings } from '../settings.ts';
 
+/** 布石を人が置くことを指す id（本将棋の「人が指す」と対になる） */
+export const HUMAN_ID = 'human';
+
 export type PlayerSpec =
   | { type: 'human' }
   | {
@@ -36,15 +39,16 @@ export const LEVELS: { level: number; label: string; temperature: number; search
   { level: 2, label: '2', temperature: 0.8, search: 1 },
   { level: 3, label: '3', temperature: 0.6, search: 1 },
   { level: 4, label: '4', temperature: 0.4, search: 1 },
-  { level: 5, label: '5 · 価値ネットで最善', temperature: 0.4, search: 8 },
+  { level: 5, label: '5', temperature: 0.4, search: 8 },
 ];
 
 export class NewGameDialog {
   private readonly dialog: HTMLDialogElement;
   private resolve: ((c: NewGameChoice | null) => void) | null = null;
+  // 既定は「玉を置く側＝エンジン、先後を選ぶ側＝人」。人はまず選ぶ側を持つほうが分かりやすい
   private last: NewGameChoice = {
     mode: 'tenbin',
-    seats: [{ type: 'human' }, { type: 'human' }],
+    seats: [{ type: 'engine', normalId: '', fusekiId: BUILTIN_ID, level: 4, secPerMove: 3 }, { type: 'human' }],
     names: ['', ''],
     timeControl: null,
   };
@@ -66,13 +70,17 @@ export class NewGameDialog {
     const fusekis = s.engines.filter((e) => e.kind === 'fuseki');
     const mainMin = l.timeControl ? Math.round(l.timeControl.mainSec / 60) : 0;
     const byo = l.timeControl?.byoyomiSec ?? 0;
+    // 登録済みのエンジンを既定にする。前に開いたとき 1 本も無ければ normalId が空のまま
+    // 残るので、一覧に居ない id はここで既定へ寄せる（「人が指す」で固まって見えるのを防ぐ）
+    const defNormal = normals.some((e) => e.id === s.normalEngineId) ? s.normalEngineId! : normals[0]?.id ?? '';
     const seat = (i: 0 | 1) => {
       const p = l.seats[i];
-      const eng = p.type === 'engine' ? p : { normalId: s.normalEngineId ?? normals[0]?.id ?? '', fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
+      const base = p.type === 'engine' ? p : { normalId: defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
+      const eng = { ...base, normalId: normals.some((e) => e.id === base.normalId) ? base.normalId : defNormal };
       return `
         <fieldset class="seat" data-seat="${i}">
           <legend class="seat-title"></legend>
-          <label>名前<input name="name${i}" value="${esc(l.names[i])}" placeholder="${i === 0 ? '先手' : '後手'}" /></label>
+          <label>名前<input name="name${i}" value="${esc(l.names[i])}" /></label>
           <div class="seat-type">
             <label><input type="radio" name="type${i}" value="human" ${p.type === 'human' ? 'checked' : ''}/> 人</label>
             <label><input type="radio" name="type${i}" value="engine" ${p.type === 'engine' ? 'checked' : ''}/> エンジン</label>
@@ -83,11 +91,12 @@ export class NewGameDialog {
               ${normals.map((e) => `<option value="${e.id}" ${eng.normalId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
             <label class="fuseki-only">布石（40手）<select name="fuseki${i}">
+              <option value="${HUMAN_ID}" ${eng.fusekiId === HUMAN_ID ? 'selected' : ''}>人が置く</option>
               <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>内蔵の方策</option>
               ${fusekis.map((e) => `<option value="${e.id}" ${eng.fusekiId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
             <div class="form-row two">
-              <label class="fuseki-only">強さ<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${lv.label}</option>`).join('')}</select></label>
+              <label class="fuseki-only" title="内蔵の方策の温度。1 は気まぐれ、5 は価値ネットで最善を選ぶ">強さ<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${lv.label}</option>`).join('')}</select></label>
               <label>1手の秒数<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
             </div>
           </div>
@@ -118,6 +127,8 @@ export class NewGameDialog {
       const mode = (form.elements.namedItem('mode') as RadioNodeList).value as Mode;
       const titles = mode === 'tenbin' ? ['玉を置く側', '先後を選ぶ側'] : ['先手', '後手'];
       this.dialog.querySelectorAll('.seat-title').forEach((el, i) => (el.textContent = titles[i]!));
+      // 天秤将棋は始める時点で先後が決まっていない。名前の下敷きも役の名で出す
+      this.dialog.querySelectorAll<HTMLInputElement>('.seat input[name^="name"]').forEach((el, i) => (el.placeholder = titles[i]!));
       // 本将棋には布石が無い。布石のエンジンと強さは隠す
       const fuseki = mode !== 'position';
       for (const el of this.dialog.querySelectorAll<HTMLElement>('.fuseki-only')) el.hidden = !fuseki;

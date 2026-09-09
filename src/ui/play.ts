@@ -12,7 +12,7 @@ import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { BuiltinEvaluator } from '../eval/builtin.ts';
 import { BUILTIN_ID } from '../settings.ts';
-import { LEVELS, type NewGameChoice, type PlayerSpec } from './newgame.ts';
+import { HUMAN_ID, LEVELS, type NewGameChoice, type PlayerSpec } from './newgame.ts';
 
 export interface PlayDeps {
   game(): Game;
@@ -110,8 +110,9 @@ export class MatchDriver {
     const spec = this.seats?.[seat];
     if (!spec) return true;
     if (spec.type === 'human') return true;
-    // 本将棋のエンジンを指定していない席は、41 手目から人が指す
-    return this.deps.game().phase === 'normal' ? !spec.normalId : false;
+    // 段階ごとに人へ渡せる。本将棋のエンジンを指定していない席は 41 手目から人が指し、
+    // 布石を「人が置く」にした席は 1〜40 手目を人が置く
+    return this.deps.game().phase === 'normal' ? !spec.normalId : spec.fusekiId === HUMAN_ID;
   }
 
   /** 新しい対局が始まったら呼ぶ（人同士でも呼んでよい） */
@@ -305,6 +306,7 @@ export class MatchDriver {
       return bm.move;
     }
     // 布石（両玉・選択・駒打ち）
+    if (spec.fusekiId === HUMAN_ID) return null; // 布石は人が置く
     const tokens = g.tokens().filter((t) => !t.startsWith('choose:'));
     const tenbin = g.mode === 'tenbin';
     const lv = LEVELS.find((l) => l.level === spec.level) ?? LEVELS[3]!;

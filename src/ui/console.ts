@@ -12,7 +12,7 @@ export class UsiConsole {
 
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = `
-      <div class="console-head"><span>USI ログ</span><button type="button" class="link" data-act="clear">消す</button></div>
+      <div class="console-head"><span>USI ログ</span><button type="button" class="link" data-act="clear">消す</button><button type="button" class="link" data-act="close">閉じる</button></div>
       <pre class="console-body" aria-live="polite"></pre>
       <form class="console-form"><input type="text" spellcheck="false" placeholder="エンジンへ送る行（例: isready）" /><button type="submit">送る</button></form>`;
     this.pre = root.querySelector('.console-body')!;
@@ -20,6 +20,9 @@ export class UsiConsole {
     root.querySelector('[data-act="clear"]')!.addEventListener('click', () => {
       this.pre.replaceChildren();
       this.lines = 0;
+    });
+    root.querySelector('[data-act="close"]')!.addEventListener('click', () => {
+      root.hidden = true;
     });
     root.querySelector('form')!.addEventListener('submit', (e) => {
       e.preventDefault();

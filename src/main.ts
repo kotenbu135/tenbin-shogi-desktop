@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
 import { Game, rebuild, squareText, colorName, colorMark, type Mode, type ViewState, type Color } from './state/game.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
-import { BUILTIN_ID, loadSettings, saveSettings, type Settings, defaultSettings } from './settings.ts';
+import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { Layout } from './ui/layout.ts';
@@ -81,6 +81,9 @@ async function main(): Promise<void> {
     save: () => saveSettings(settings),
     onChanged: () => analysis.refreshEngineList(),
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
+    openLog: () => {
+      consoleEl.hidden = false;
+    },
   });
   const newGameDialog = new NewGameDialog($('dialogs'), () => settings);
   const setupDialog = new SetupDialog($('dialogs'), {
@@ -88,11 +91,6 @@ async function main(): Promise<void> {
     save: () => saveSettings(settings),
     openEngines: () => engineDialog.open(),
     register: (path, name, evalScale) => engineDialog.addInstalled(path, name, evalScale),
-    reset: async () => {
-      await saveSettings(defaultSettings());
-      location.reload();
-    },
-    openLayout: () => layout.openMenu($('dialogs')),
     say: (text, error) => say(text, error),
   });
 
@@ -141,6 +139,11 @@ async function main(): Promise<void> {
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
     openEngineSettings: () => engineDialog.open(),
     onKifuAnalysis: () => void kifuAnalysis(),
+    onStartAnalysis: () => {
+      // 検討は「いまの局面を調べる」もの。対局が動いていると局面が先へ行ってしまうので止める。
+      // 止めても盤は触れる（自分で駒を動かして変化を並べられる）
+      if (driver.active && !driver.isPaused && game.phase !== 'over') void togglePause();
+    },
     pvText: (usis, t) => gameForPv(t).japanesePv(usis),
   });
 
@@ -385,6 +388,7 @@ async function main(): Promise<void> {
     evals.clear();
     shapes = [];
     flipLocked = false;
+    board.setOrientation('sente');
     board.clearSelection();
     paintAll();
   }
@@ -494,7 +498,8 @@ async function main(): Promise<void> {
     const v = lastView ?? currentView();
     const live = cursor === null;
     board.render(v.snapshot, {
-      interactive: live && !driver.isPaused && v.phase !== 'over' && v.phase !== 'choose',
+      // 一時停止中も盤は触れる。エンジンは指さないので、検討しながら自分で変化を並べられる
+      interactive: live && v.phase !== 'over' && v.phase !== 'choose',
       thinking: live ? thinkingColor : null,
       phase: v.phase,
       dropSquares: (role) => (live ? game.dropSquares(role) : new Set()),
@@ -533,10 +538,22 @@ async function main(): Promise<void> {
 
   /** 人が 1 人だけの対局なら、その人の側から見た向きにする。手で反転したらそれを尊重する */
   function autoFlip(): void {
-    if (flipLocked || beforeChoice()) return;
+    if (flipLocked) return;
+    // 先後が決まる前は、先に置く玉（先手玉）が手前に来る向きで揃える。
+    // 前の対局で反転したまま始まると、1 手目の玉が奥に置かれて分かりにくい
+    if (beforeChoice()) {
+      board.setOrientation('sente');
+      return;
+    }
     const seat = driver.soleHumanSeat();
     if (seat === null) return;
     board.setOrientation(driver.seatOfColor('sente') === seat ? 'sente' : 'gote');
+  }
+
+  /** 盤の向きを手で変える。手で決めたら、以後は自動で反転しない */
+  function flipBoard(): void {
+    flipLocked = true;
+    board.setOrientation(board.currentOrientation === 'sente' ? 'gote' : 'sente');
   }
 
   function paintToolbar(): void {
@@ -704,19 +721,18 @@ async function main(): Promise<void> {
   toolbar.innerHTML = `
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>天秤将棋</span></div>
     <div class="tools">
-      <button type="button" data-act="new" title="新しい対局">${ICON.play}<span>新しい対局</span></button>
-      <button type="button" data-act="undo" title="待った（1 手戻す）">${ICON.undo}<span>待った</span></button>
+      <button type="button" data-act="new" title="新しい対局（Ctrl+N）">${ICON.play}<span>新しい対局</span></button>
+      <button type="button" data-act="undo" title="待った・1 手戻す（Backspace）">${ICON.undo}<span>待った</span></button>
       <button type="button" data-act="resign" title="投了">${ICON.flag}<span>投了</span></button>
-      <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める">${ICON.pause}<span>一時停止</span></button>
-      <button type="button" data-act="flip" title="盤面反転">${ICON.flip}<span>盤面反転</span></button>
+      <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める（Space）">${ICON.pause}<span>一時停止</span></button>
+      <button type="button" data-act="flip" title="盤面反転（F）">${ICON.flip}<span>盤面反転</span></button>
       <button type="button" data-act="edit" title="局面編集">${ICON.edit}<span>局面編集</span></button>
-      <button type="button" data-act="open" title="棋譜を開く">${ICON.open}<span>開く</span></button>
-      <button type="button" data-act="save" title="棋譜を保存">${ICON.save}<span>保存</span></button>
+      <button type="button" data-act="open" title="棋譜を開く（Ctrl+O）。貼り付け（Ctrl+V）でも読み込めます">${ICON.open}<span>開く</span></button>
+      <button type="button" data-act="save" title="棋譜を保存（Ctrl+S）。Ctrl+C で棋譜を写します">${ICON.save}<span>保存</span></button>
     </div>
     <div class="tools right">
       <button type="button" data-act="setup" title="はじめに（エンジンの入れ方・片づけ方）">${ICON.help}<span>はじめに</span></button>
-      <button type="button" data-act="console" aria-pressed="false" title="USI ログ">${ICON.terminal}<span>USI ログ</span></button>
-      <button type="button" data-act="engines" title="エンジンの登録">${ICON.sliders}<span>エンジン</span></button>
+      <button type="button" data-act="engines" title="エンジンの登録（USI ログもここから）">${ICON.sliders}<span>エンジン</span></button>
       <button type="button" data-act="theme" title="明るさを切り替える">${ICON.theme}<span>テーマ</span></button>
     </div>`;
   const saveMenu = document.createElement('dialog');
@@ -751,9 +767,7 @@ async function main(): Promise<void> {
         if (cursor === null && !editor && game.phase !== 'over' && confirm(`${colorName(game.turn)}が投了しますか`)) tryApply('resign');
         break;
       case 'flip':
-        // 手で向きを決めたら、以後は自動で反転しない
-        flipLocked = true;
-        board.setOrientation(board.currentOrientation === 'sente' ? 'gote' : 'sente');
+        flipBoard();
         break;
       case 'pause':
         void togglePause();
@@ -772,10 +786,6 @@ async function main(): Promise<void> {
       case 'save':
         saveMenu.showModal();
         break;
-      case 'console':
-        consoleEl.hidden = !consoleEl.hidden;
-        b.setAttribute('aria-pressed', String(!consoleEl.hidden));
-        break;
       case 'setup':
         void setupDialog.open();
         break;
@@ -793,15 +803,96 @@ async function main(): Promise<void> {
     }
   });
 
+  /** 文字を打っている最中や、窓が開いているときはキー操作を横取りしない */
+  function keysBusy(target: EventTarget | null): boolean {
+    const t = target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return true;
+    return document.querySelector('dialog[open]') !== null || editor !== null;
+  }
+
+  /** 棋譜を写す（Ctrl+C）。貼り付けはこのアプリ同士でも将棋所などとも行き来できる */
+  async function copyKif(): Promise<void> {
+    if (game.moves.length === 0) {
+      say('棋譜がまだありません', true);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(writeKif(game, kifMeta()));
+      say('棋譜を写しました（Ctrl+V で他のソフトへ貼れます）');
+    } catch (e) {
+      say(`棋譜を写せません: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+  }
+
+  /** 貼り付けた文字を棋譜として読む（Ctrl+V） */
+  function pasteKif(text: string): void {
+    if (!text.trim()) return;
+    if (game.moves.length > 0 && game.phase !== 'over' && !confirm('いまの対局を捨てて、貼り付けた棋譜を開きますか')) return;
+    try {
+      loadKifText(text);
+      say(`貼り付けた棋譜を開きました（${game.moves.length} 手）`);
+    } catch (e) {
+      say(`棋譜として読めません: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+  }
+
+  window.addEventListener('paste', (e) => {
+    if (keysBusy(e.target)) return;
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (!text.trim()) return;
+    e.preventDefault();
+    pasteKif(text);
+  });
+
   window.addEventListener('keydown', (e) => {
-    const t = e.target as HTMLElement;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-    if (document.querySelector('dialog[open]') || editor) return;
+    if (keysBusy(e.target)) return;
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+V は paste で受ける（keydown からは貼り付けた中身が読めない）
+      switch (e.key.toLowerCase()) {
+        case 'n':
+          e.preventDefault();
+          void newGame();
+          return;
+        case 'o':
+          e.preventDefault();
+          void openKif();
+          return;
+        case 's':
+          e.preventDefault();
+          saveMenu.showModal();
+          return;
+        case 'c':
+          e.preventDefault();
+          void copyKif();
+          return;
+        default:
+          return;
+      }
+    }
+    if (e.altKey || e.shiftKey) return;
     const map: Record<string, 'first' | 'prev' | 'next' | 'last'> = { ArrowLeft: 'prev', ArrowRight: 'next', Home: 'first', End: 'last' };
     const d = map[e.key];
-    if (!d) return;
-    e.preventDefault();
-    kifu.seek(d);
+    if (d) {
+      e.preventDefault();
+      kifu.seek(d);
+      return;
+    }
+    switch (e.key) {
+      case ' ':
+        if (!driver.active) return;
+        e.preventDefault();
+        void togglePause();
+        return;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        flipBoard();
+        return;
+      case 'Backspace':
+        e.preventDefault();
+        undo();
+        return;
+    }
   });
 
   window.addEventListener('beforeunload', () => {

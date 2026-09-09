@@ -138,8 +138,11 @@ const slotCols = () => ev(() => {
   return `${document.querySelectorAll('.user-slots .analysis-slot').length} 枠 / ${cols} 列 / 読み筋の幅 ${Math.round(pv)}px`;
 });
 console.log('2 欄のとき:', await slotCols());
-// 配置の窓は「はじめに」から開く（ツールバーの配置ボタンは外した）
-const openLayout = async () => { await click('button[data-act="setup"]'); await click('.setup-dialog [data-act="layout"]'); await new Promise((r) => setTimeout(r, 150)); };
+// 配置の窓は欄の見出しを右クリックして開く（ボタンは全部外した）
+const openLayout = async () => {
+  await ev(() => document.querySelector('.tabbar').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+  await new Promise((r) => setTimeout(r, 150));
+};
 const closeLayout = async () => { await ev(() => document.querySelector('.layout-dialog')?.close()); await new Promise((r) => setTimeout(r, 150)); };
 await openLayout();
 await click('.layout-dialog [data-preset="1"]');
@@ -171,8 +174,7 @@ await dragTab('winrate', { x: bottom.x + 200, y: bottom.y + bottom.height / 2 })
 console.log('期待勝率を左の欄へ掴んで運んだ:', await panes());
 await dragTab('winrate', { x: bottom.x + bottom.width - 8, y: bottom.y + bottom.height / 2 });
 console.log('右の端へ落として新しい欄:', await panes(), '| 欄の数', await ev(() => document.querySelectorAll('.pane').length));
-await click('button[data-act="setup"]');
-await click('.setup-dialog [data-act="layout"]');
+await openLayout();
 await click('.layout-dialog [data-act="reset"]');
 await ev(() => document.querySelector('.layout-dialog').close());
 await tab('analysis');
@@ -208,7 +210,7 @@ await new Promise((r) => setTimeout(r, 300));
 const atPause = await ev(() => window.tenbin.game().moves.length);
 await new Promise((r) => setTimeout(r, 1500));
 const afterPause = await ev(() => window.tenbin.game().moves.length);
-console.log('一時停止:', await status(), '| 手数', atPause, '→', afterPause, '| 盤は触れない:', await ev(() => document.querySelector('.cell')?.disabled));
+console.log('一時停止:', await status(), '| 手数', atPause, '→', afterPause, '| 止めても盤は触れる:', await ev(() => document.querySelector('.cell')?.disabled === false));
 await click('button[data-act="pause"]');
 await new Promise((r) => setTimeout(r, 1200));
 console.log('再開:', await ev(() => window.tenbin.game().moves.length), '手目まで進んだ');

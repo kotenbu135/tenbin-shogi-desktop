@@ -13,6 +13,8 @@ export interface EngineDialogDeps {
   save(): Promise<void>;
   onChanged(): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
+  /** USI の生ログを出す（エンジンが起動しないときの手がかり） */
+  openLog(): void;
 }
 
 interface FoundExecutable {
@@ -56,6 +58,7 @@ export class EngineDialog {
           <button type="button" class="link" data-act="open-dir">フォルダを開く</button></p>
         <ul class="engine-list"></ul>
         <div class="dialog-actions">
+          <button type="button" data-act="log" title="エンジンとのやり取り（USI）をそのまま見る。起動しないときの手がかりになる">USI ログ</button>
           <button type="button" data-act="import">フォルダから取り込む</button>
           <button type="button" data-act="add" class="primary">実行ファイルを選んで追加</button>
         </div>
@@ -111,6 +114,10 @@ export class EngineDialog {
       });
       ul.appendChild(li);
     }
+    d.querySelector('[data-act="log"]')!.addEventListener('click', () => {
+      this.dialog.close();
+      this.deps.openLog();
+    });
     d.querySelector('[data-act="add"]')!.addEventListener('click', () => void this.addByFile());
     d.querySelector('[data-act="import"]')!.addEventListener('click', () => void this.importFromDir());
     d.querySelector('[data-act="open-dir"]')!.addEventListener('click', () => {

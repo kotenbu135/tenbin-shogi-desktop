@@ -1,158 +1,79 @@
-# 天秤将棋 デスクトップ
+# 天秤将棋
 
-天秤将棋（布石将棋）のデスクトップ GUI。Tauri v2 + TypeScript。
-布石の段階から評価値を出し、手元の PC のエンジンで検討する。
+先に両方の玉を置き、あとから先後を選ぶ将棋のアプリ。Windows 用。
+布石（1〜40手目）から評価値と期待勝率が出て、41手目からの本将棋は手元のエンジンで検討できます。
 
-- 設計の検討: [docs/plan-desktop-gui.md](docs/plan-desktop-gui.md)
-- 既存の GUI との比較と問題点: [docs/review-vs-existing-gui.md](docs/review-vs-existing-gui.md)
-- 布石 USI 拡張: [docs/usi-fuseki-extension.md](docs/usi-fuseki-extension.md)
-- 画面の設計: [docs/design.md](docs/design.md)
-- モデルの配布: [docs/plan-model-distribution.md](docs/plan-model-distribution.md)
+## 入れる
 
-エンジンと評価関数は**同梱しない**。各自で用意し、「エンジン」から場所を指定する。
+1. [Releases](https://github.com/kotenbu135/tenbin-shogi-desktop/releases/latest) から
+   `tenbin-shogi_x.y.z_x64-setup.exe` を落として実行します。
+2. 「**Windows によって PC が保護されました**」が出たら「詳細情報」→「実行」。
+   有料の署名を付けていないため、初回だけこの画面が出ます。
+3. 初めて開くと「はじめに」が出るので、**「エンジンを自動で入れる」を 1 回押します**。
+   やねうら王＋水匠5（約 40MB）を公式の配布先から取ってきて、この PC に合うものを選んで登録します。
 
-## いま動くもの（v0）
+布石の評価はアプリの中に入っているので、エンジンが無くても布石の検討と AI との対局はできます。
+41手目からの本将棋にだけエンジンが要ります。
 
-- 天秤将棋の手順（両玉 → 先後の選択 → 布石 38 手 → 本将棋）と布石将棋。ルールは wasm（cppshogi）が持つ
-- 盤・駒台・名札・棋譜（連盟の符号、局面の移動、分岐）・待った・投了、41 手目の裁定。駒は公開版と同じ kanji_light
-- USI エンジンの登録。何本でも。`usi` の申告から設定画面を作る（Threads・USI_Hash・EvalDir も申告の 1 項目）。エンジンのフォルダから一括で取り込める。評価値→勝率の目盛りはエンジンごと
-- 布石の評価を内蔵（方策・価値ネット・両玉の価値表を onnxruntime-web で）。エンジンが無くても 1〜40 手目の検討と AI の布石が動く
-- 画面の割りつけは利用者が決める。上に盤と棋譜、下は「欄」の並び（既定は 2 欄で、左に候補手と検討・右にグラフ）。
-  タブは掴んで別の欄へ運べる（欄の境や下の欄の端に落とすと新しい欄ができる）。「配置」でひな形（1 欄 / 2 欄 / 3 欄）を選ぶか、タブを左右へ送れる。仕切りは掴むと動く
-- 候補手（対局中のエンジンの読み）は検討と別のタブ。片方が人でも左が先手・右が後手の 2 分割のまま。
-  対局中のエンジンには「候補」の数だけ MultiPV を送る（既定 3。増やすと候補は並ぶが読みは少し落ちる）
-- 一時停止（エンジンの思考と時計を止める）、人が 1 人だけの対局は自動でその人の側から盤を向ける、
-  エンジン同士なら読んでいる候補を盤に矢印で出す
-- 検討: 枠を足して複数のエンジンで同じ局面を並べて検討できる。「自動」の枠は布石中は内蔵、41 手目からは既定のエンジンに切り替わる。候補の行き先を盤に矢印と印で示す。終局した局面も検討できる
-- 候補の表は 順位 / 深さ / Node数 / **評価値** / **期待勝率** / 読み筋。評価値と期待勝率はどちらも先手から見た値
-- 対局中の読み: 手番のエンジンの読み筋・深さ・ノード数を検討パネルの「対局の枠」に出す（ShogiHome と同じく、思考と検討は同じ欄）
-- 棋譜解析: 棋譜の局面を順に評価してグラフを埋める（範囲と 1 局面の秒数を指定。布石は内蔵、41 手目からは既定のエンジン）
-- 対局: 席ごとに人かエンジンか。布石は内蔵の方策（強さ 1〜5）か布石対応のエンジン、本将棋は登録したどのエンジンでも。
-  ルールは 天秤将棋 / 布石将棋 / **本将棋（ふつうの平手）** から選ぶ
-- 評価グラフは 2 種（評価値 ±2000 / 期待勝率 0〜100%）。系列は先手・後手・検討の 3 本。押すとその手数の局面へ移る。
-  cp を持たないエンジン（内蔵の布石評価）の点は中を抜いた丸で描き、勝率からの換算だと分かるようにする
-- 対局時計（持ち時間と秒読み。消費時間を棋譜に残す）
-- KIF の保存と読み込み。対局全体（布石を含む、このアプリの方言）と、本将棋の部分だけ（局面図つきの普通の KIF。将棋所や ShogiHome で開ける）
-- 局面編集（任意の局面から本将棋を始める）、盤面反転
-- USI ログ（生の往復を見る・手で送る）
-- 明／暗テーマ
+## 遊ぶ
 
-布石中の検討は内蔵の評価が受ける（公開サイトと同じ 3 つのモデル。`public/models/models.json`）。
-外部の布石エンジン（USI 布石拡張。開発リポジトリの `scripts/fuseki_usi_server.py`）も登録できる。
-仕様は `docs/usi-fuseki-extension.md`。
+- **新しい対局** … ルール（天秤将棋 / 布石将棋 / 本将棋）と、どちら側を人が持つかを選びます。
+  段階ごとに担当を分けられます（布石は自分で置いて、41手目からはエンジンに任せる、など）。
+- **検討** … 押すと対局は止まり、盤の駒は自分で動かせます。変化を並べながら候補手を見られます。
+- **グラフ** … 評価値（±2000）と期待勝率（0〜100%）。押すとその局面へ飛びます。
+- **棋譜** … KIF の保存と読み込み。本将棋の部分だけを普通の KIF で出せば、将棋所や ShogiHome で開けます。
+- 画面の割りつけは自由です。タブを掴んで別の欄へ運べます（欄の見出しを右クリックでひな形）。
 
-## 構成
+### キー操作
 
-```
-src/            フロントエンド（TypeScript、フレームワーク無し）
-  rules/        wasm の呼び出し規約（布石のルール）
-  state/        対局の状態（布石は wasm、本将棋は shogiops）
-  usi/          USI の分解とエンジンの状態機械
-  ui/           盤・棋譜・検討・グラフ・ログ・エンジン登録
-public/wasm/    cppshogi の wasm（開発リポジトリ engine/dlshogi/cppshogi をビルドしたもの）
-src-tauri/      Tauri（Rust）。コマンドとイベントの橋渡しだけ
-crates/usi-host USI プロセスの起動・行の送受信（Tauri 非依存。単体テストあり）
-docs/           設計
-```
+| キー | すること |
+|---|---|
+| ← → / Home End | 棋譜を戻る・進む・最初・最新 |
+| Backspace | 待った（1 手戻す） |
+| Space | 一時停止・再開 |
+| F | 盤面反転 |
+| Ctrl+V | 棋譜を貼り付けて開く |
+| Ctrl+C | 棋譜を写す |
+| Ctrl+N / Ctrl+O / Ctrl+S | 新しい対局 / 開く / 保存 |
+
+## 更新
+
+起動のたびに新しい版を見に行き、見つかったら知らせます。**承諾したときだけ**入れ替えて再起動します。
+「はじめに」→「更新を確認」でいつでも確かめられます。
+
+## アンインストール
+
+Windows の「設定 → アプリ」から「天秤将棋」を消します。
+設定と入れたエンジンは `%APPDATA%\com.fusekishogi.tenbin` に残るので、そこも消せば何も残りません。
+設定だけまっさらにしたいときも、このフォルダを消してから起動します。
+
+## エンジンを手で入れる
+
+「エンジン」→「実行ファイルを選んで追加」か「フォルダから取り込む」。USI 対応なら何本でも登録できます。
+起動して `usi` の申告を読み、設定画面を申告どおりに作ります。
+
+- やねうら王: https://github.com/yaneurao/YaneuraOu/releases/tag/V9.00
+  （`yaneuraou-V900-git-win64-all.7z` の中の `NNUE_halfkp_256x2_32_32/…_AVX2.exe` が水匠5 用）
+- 水匠5 の評価関数: https://github.com/yaneurao/YaneuraOu/releases/tag/suisho5
+  （展開した `nn.bin` を実行ファイルの隣の `eval/` へ。勝率の目盛りは **652 / +51**）
+
+エンジンが起動しないときは「エンジン」→「USI ログ」で生のやり取りを見られます。
 
 ## 開発
 
-必要なもの: Node.js 22 以上、Rust（stable）、Tauri v2 の OS 依存パッケージ。
+Tauri v2 + TypeScript（フレームワーク無し）。ルールは wasm（cppshogi）、本将棋は shogiops。
 
 ```bash
 npm install
 npm test                 # USI の分解のテスト
 cargo test -p usi-host   # プロセス管理のテスト
-npm run dev              # ブラウザでプレビュー（盤と棋譜は動く。エンジンは起動できない）
 npm run tauri dev        # アプリとして起動
-npm run tauri build      # 配布物
 ```
 
-### 動作の確かめ方（自動）
-
-```bash
-npm run build && npm run preview          # http://localhost:4173
-node scripts/smoke-preview.mjs /tmp       # ブラウザで両玉→布石→本将棋→待ったを通す
-node scripts/smoke-builtin.mjs /tmp       # 内蔵の布石評価・複数枠の検討・内蔵同士の自動対局
-node scripts/smoke-review.mjs /tmp        # 割りつけ・対局の枠・2 種のグラフ・終局後の検討・棋譜解析・狭い窓
-WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 npm run tauri dev   # 別の端末で
-node scripts/drive-app.mjs /tmp           # 動いているアプリを操作し、登録済みエンジンで検討まで通す
-node scripts/drive-engines.mjs /tmp <エンジン>  # 申告の読み取り→登録→エンジン同士の対局→複数枠の検討
-```
-
-`drive-app.mjs` は Linux（WebKitGTK）向け。Windows の WebView2 では動かない。
-
-### WSL / Ubuntu で `tauri dev` するには
-
-```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev fonts-noto-cjk
-```
-
-`fonts-noto-cjk` は日本語の書体。無いと符号や駒台の文字が代替フォントで崩れる。
-
-### Windows で使うには
-
-Windows 側に Rust と Node.js を入れて `npm run tauri dev`。
-エンジンはこのアプリから `wsl.exe` 経由でも起動できる。実行ファイルに `C:\Windows\System32\wsl.exe`、
-起動時の引数に `-d Ubuntu-24.04 -- /home/you/engine/usi` を入れる。GPU を使う布石エンジンを WSL 側で回す想定。
-
-## はじめに（セットアップ）
-
-アプリを開くと「はじめに」が出ます（右上の ? でいつでも）。
-
-**「エンジンを自動で入れる」を押すだけです。** やねうら王の実行ファイルと水匠5 の評価関数を
-公式の配布先から取ってきて、この PC の CPU に合うものを選んで置き、勝率の目盛り（652 / +51）まで
-入れて登録します（約 40MB）。
-
-手で入れるなら、実行ファイルをエンジンのフォルダ（「はじめに」に場所が出ます）に置いて
-「エンジン」→「フォルダから取り込む」。やねうら王を使うなら隣に `eval/nn.bin`（水匠5）を置きます。
-
-- やねうら王の実行ファイル: https://github.com/yaneurao/YaneuraOu/releases/tag/V9.00
-  （`yaneuraou-V900-git-win64-all.7z` の中の `NNUE_halfkp_256x2_32_32/…_AVX2.exe` が水匠5 用）
-- 水匠5 の評価関数: https://github.com/yaneurao/YaneuraOu/releases/tag/suisho5
-  （`Suisho5.7z` を展開すると `nn.bin`。FV_SCALE の最適値は 24 なので目盛りは 652 / +51）
-
-布石（1〜40手目）の評価は内蔵しているので、**エンジンが無くても布石の検討と AI との対局はできます**。
-
-## 更新
-
-起動のたびに新しい版が出ていないか見に行きます（GitHub の Releases の `latest.json`）。
-見つかったら知らせ、**承諾したときだけ**取り込んで入れ替え、再起動します。
-「はじめに」→「更新を確認する」でいつでも確かめられます。
-
-配る側の手順:
-
-1. `package.json` と `src-tauri/tauri.conf.json` の `version` を上げる
-2. `git tag v0.2.0 && git push --tags` → `.github/workflows/release.yml` が Windows の配布物を作り、
-   Releases に**下書き**で置く（`latest.json` つき）
-3. 中身を確かめて publish する
-
-署名の鍵が要ります。`npx tauri signer generate -w <保管場所>/tenbin-updater.key` で作り、
-公開鍵は `src-tauri/tauri.conf.json` の `plugins.updater.pubkey`、秘密鍵はリポジトリの
-Secrets（`TAURI_SIGNING_PRIVATE_KEY` と `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）に入れます。
-**秘密鍵をリポジトリに入れてはいけません。無くすと更新を配れなくなります。**
-
-リポジトリが private のあいだは、利用者のアプリから `latest.json` を取れません。
-公開にするか、`plugins.updater.endpoints` を自分の置き場所（Cloudflare Pages など）に変えてください。
-
-## やめるとき（アンインストール）
-
-- アプリ本体: Windows は「設定 → アプリ」から「天秤将棋」をアンインストール。展開しただけの版はそのフォルダを消す
-- 設定とエンジンの登録: アプリのデータフォルダに残ります（Windows は `%APPDATA%\com.fusekishogi.tenbin`、
-  Linux は `~/.local/share/com.fusekishogi.tenbin`）。まるごと消せば何も残りません
-- 登録し直したいだけなら、「はじめに」の「設定を初期に戻す」
-
-## エンジンの登録
-
-「エンジン」→「実行ファイルを選んで追加」か「フォルダから取り込む」。起動して `usi` の申告を読み、
-設定画面を申告どおりに作る。エンジンのフォルダ（アプリのデータフォルダの `engines/`）に置けばまとめて拾える。
-
-| 項目 | 中身 |
-|---|---|
-| 実行ファイル | 例: `C:\shogi\YaneuraOu_NNUE.exe`、`Suisho5-AVX2.exe`。Windows の実行ファイルは WSL の Linux 版アプリからも動く |
-| エンジンの設定 | 申告された option（Threads・USI_Hash・EvalDir・MultiPV …）。変えた値だけ保存する |
-| 勝率の目盛り | cp→勝率の S と offset。既定 600 / 0。水匠5（FV_SCALE 16）は 435 / +34、水匠5の実行ファイル（FV_SCALE 24）は 652 / +51 |
-| 使える局面 | 本将棋（41手目以降）だけ / 布石にも対応。`Fuseki_*` の申告があれば後者を提案 |
+- 配布の手順と署名の鍵: [docs/release.md](docs/release.md)
+- 設計と検証: [docs/plan-desktop-gui.md](docs/plan-desktop-gui.md) ·
+  [docs/review-vs-existing-gui.md](docs/review-vs-existing-gui.md) ·
+  [docs/design.md](docs/design.md) · [docs/usi-fuseki-extension.md](docs/usi-fuseki-extension.md)
 
 ## ライセンス
 

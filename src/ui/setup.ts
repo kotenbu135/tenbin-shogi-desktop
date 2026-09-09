@@ -21,10 +21,6 @@ export interface SetupDeps {
   openEngines(): void;
   /** 取り込んだエンジンを登録する。戻り値は申告を読めなかったときの理由 */
   register(path: string, name: string, evalScale: { scale: number; offsetCp: number }): Promise<string | null>;
-  /** 設定を初期に戻す */
-  reset(): Promise<void>;
-  /** 下の欄の配置を選ぶ窓を開く */
-  openLayout(): void;
   /** 状態の行に出す */
   say(text: string, error?: boolean): void;
 }
@@ -64,16 +60,9 @@ export class SetupDialog {
         case 'open-dir':
           void reveal(b.dataset.dir || this.enginesDir);
           break;
-        case 'layout':
-          this.dialog.close();
-          this.deps.openLayout();
-          break;
         case 'update':
           this.dialog.close();
           void checkUpdate(false, { say: this.deps.say });
-          break;
-        case 'reset':
-          if (confirm('エンジンの登録・画面の配置・目盛りをすべて初期に戻します。よろしいですか')) void this.deps.reset();
           break;
       }
     });
@@ -154,16 +143,15 @@ export class SetupDialog {
         </section>
 
         <section class="setup-step">
-          <h3>やめるとき</h3>
-          <p class="hint">Windows は「設定 → アプリ」から天秤将棋をアンインストール。設定とエンジンの登録は下に残るので、消せば何も残りません。</p>
+          <h3>アンインストール</h3>
+          <p class="hint">Windows の「設定 → アプリ」から天秤将棋を消します。設定と入れたエンジンは下のフォルダに残るので、
+            そこも消せば何も残りません（設定をまっさらにしたいときも、このフォルダを消してから起動します）。</p>
           ${dir('データ', this.dataDir)}
         </section>
 
         <div class="dialog-actions">
           <button type="button" data-act="engines">エンジンの登録</button>
-          <button type="button" data-act="layout">画面の配置</button>
           <button type="button" data-act="update">更新を確認</button>
-          <button type="button" class="danger" data-act="reset">初期に戻す</button>
           <button type="button" class="primary" data-act="close">閉じる</button>
         </div>
       </div>`;
