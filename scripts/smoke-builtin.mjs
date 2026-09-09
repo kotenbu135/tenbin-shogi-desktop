@@ -48,7 +48,7 @@ console.log('3手目の候補:', await ev(() => [...document.querySelectorAll('.
 // グラフは下の欄のタブ。開いてから読む
 await ev(() => document.querySelector('.tab[data-tab="winrate"]').click());
 await new Promise((r) => setTimeout(r, 150));
-console.log('矢印/印:', await ev(() => document.querySelectorAll('svg.shapes .shape').length), '/ グラフ:', await ev(() => document.querySelector('#graph')?.textContent?.match(/\d+\.\d%/)?.[0]), '/ 点:', await ev(() => document.querySelectorAll('#graph .pt').length));
+console.log('矢印/印:', await ev(() => document.querySelectorAll('svg.shapes .shape').length), '/ グラフ:', await ev(() => document.querySelector('#graph-winrate')?.textContent?.match(/\d+\.\d%/)?.[0]), '/ 点:', await ev(() => document.querySelectorAll('#graph-winrate .pt').length));
 await ev(() => document.querySelector('.tab[data-tab="analysis"]').click());
 await page.screenshot({ path: `${OUT}/builtin-analysis.png` });
 

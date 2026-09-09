@@ -24,12 +24,12 @@
           </aside>
         </div>
         <div class="split split-h" id="split-h" role="separator" aria-orientation="horizontal" aria-label="下の欄の高さ" tabindex="0"></div>
-        <div class="pane-bottom">
-          <div class="tabbar" id="tabbar" role="tablist"></div>
-          <div class="tab-body">
-            <div class="analysis" id="analysis" role="tabpanel"></div>
-            <div class="graph" id="graph" role="tabpanel" hidden></div>
-          </div>
+        <!-- 下の欄は利用者が組み替える。欄とタブは src/ui/layout.ts が組み立て、中身の要素をここから移す -->
+        <div class="pane-bottom" id="bottom"></div>
+        <div id="panels" hidden>
+          <div class="analysis" id="analysis" role="tabpanel"></div>
+          <div class="graph" id="graph-score" role="tabpanel"></div>
+          <div class="graph" id="graph-winrate" role="tabpanel"></div>
         </div>
       </main>
       <footer class="status" id="status"></footer>

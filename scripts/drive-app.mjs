@@ -57,7 +57,7 @@ console.log('notice:', await ev('document.querySelector(".analysis-notice").hidd
 // グラフは下の欄のタブ。開いてから読む
 await step('.tab[data-tab="score"]');
 await sleep(300);
-console.log('評価値のグラフ:', await ev('document.querySelector("#graph .axis.current")?.textContent + " / 点 " + document.querySelectorAll("#graph .pt").length'));
+console.log('評価値のグラフ:', await ev('document.querySelector("#graph-score .axis.current")?.textContent + " / 点 " + document.querySelectorAll("#graph-score .pt").length'));
 await shot(`${OUT}/app-score.png`);
 await step('.tab[data-tab="analysis"]');
 await sleep(300);

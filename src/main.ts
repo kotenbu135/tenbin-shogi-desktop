@@ -8,7 +8,7 @@ import { Clock, type TimeControl } from './state/clock.ts';
 import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
-import { Layout, type TabId } from './ui/layout.ts';
+import { Layout } from './ui/layout.ts';
 import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel, type Target } from './ui/analysis.ts';
 import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
@@ -62,7 +62,8 @@ async function main(): Promise<void> {
 
   const status = $('status');
   const consoleEl = $('console');
-  const graphEl = $('graph');
+  const scoreEl = $('graph-score');
+  const winrateEl = $('graph-winrate');
   const editorEl = $('editor');
   const usiConsole = new UsiConsole(consoleEl);
 
@@ -183,17 +184,9 @@ async function main(): Promise<void> {
     onThinkEnd: (seat, state) => analysis.endPlayer(seat, state),
   });
 
-  const graph = new TenbinGraph(graphEl);
-  const layout = new Layout($('main'), $('tabbar'), { analysis: $('analysis'), score: graphEl, winrate: graphEl }, {
-    layout: () => settings.layout,
-    save: () => void saveSettings(settings),
-    onTab: (id: TabId) => {
-      if (id !== 'analysis') graph.setType(id);
-      paintGraph(null);
-    },
-  });
-  layout.setTab(settings.layout.tab);
-  graph.onSeek = (ply) => {
+  // グラフは 2 つ立てる。別々の欄に置いて同時に見られるようにするため、種類は作るときに決める
+  const graphs = [new TenbinGraph(scoreEl, 'score'), new TenbinGraph(winrateEl, 'winrate')] as const;
+  const seek = (ply: number): void => {
     if (editor) return;
     // その手数までの棋譜の位置へ。手数を持たない行（先後の選択）は飛ばす
     let idx = 0;
@@ -204,6 +197,12 @@ async function main(): Promise<void> {
     board.clearSelection();
     paintAll();
   };
+  for (const g of graphs) g.onSeek = seek;
+  const layout = new Layout($('main'), $('bottom'), { analysis: $('analysis'), score: scoreEl, winrate: winrateEl }, {
+    layout: () => settings.layout,
+    save: () => void saveSettings(settings),
+    onChange: () => paintGraph(null),
+  });
 
   /** 検討に渡す局面。終局した局面も、その段階のルールで検討できるよう stage を添える */
   function targetOf(v: ViewState): Target {
@@ -393,11 +392,11 @@ async function main(): Promise<void> {
   let lastView: ViewState | null = null;
 
   function paintGraph(current: { p: number; cp: number | null; approx: boolean } | null): void {
-    // タブが閉じているあいだは幅が 0。開いたときに描き直す
-    if (graphEl.hidden) return;
     const v = lastView ?? currentView();
     const cur = current ?? evalAt(v.ply);
-    graph.render({ points: [...evals.values()], ply: v.ply, current: cur, fusekiEnd: game.mode === 'position' ? 0 : 40 });
+    const input = { points: [...evals.values()], ply: v.ply, current: cur, fusekiEnd: game.mode === 'position' ? 0 : 40 };
+    // 閉じたタブと組み替えの途中は幅が 0。開いたときに描き直す
+    for (const g of graphs) if (layout.visible(g.type)) g.render(input);
   }
 
   function names(): Partial<Record<Color, string>> {
@@ -523,7 +522,6 @@ async function main(): Promise<void> {
     });
     if (v.phase === 'normal' || v.phase === 'over') editor.loadSnapshot(v.snapshot);
     else editor.loadSfen('lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1');
-    graphEl.hidden = true;
     editorEl.hidden = false;
     document.body.classList.add('editing');
     say('局面編集中。駒を置いて「この局面から本将棋を始める」を押します');
@@ -534,7 +532,6 @@ async function main(): Promise<void> {
     editor = null;
     editorEl.hidden = true;
     editorEl.innerHTML = '';
-    graphEl.hidden = false;
     document.body.classList.remove('editing');
   }
 
@@ -603,6 +600,7 @@ async function main(): Promise<void> {
       <button type="button" data-act="undo">${ICON.undo}<span>待った</span></button>
       <button type="button" data-act="resign">${ICON.flag}<span>投了</span></button>
       <button type="button" data-act="flip">${ICON.flip}<span>盤面反転</span></button>
+      <button type="button" data-act="layout" title="下の欄の並びを変える">${ICON.layout}<span>配置</span></button>
       <button type="button" data-act="edit">${ICON.edit}<span>局面編集</span></button>
       <button type="button" data-act="open">${ICON.open}<span>開く</span></button>
       <button type="button" data-act="save">${ICON.save}<span>保存</span></button>
@@ -645,6 +643,9 @@ async function main(): Promise<void> {
         break;
       case 'flip':
         board.setOrientation(board.currentOrientation === 'sente' ? 'gote' : 'sente');
+        break;
+      case 'layout':
+        layout.openMenu($('dialogs'));
         break;
       case 'edit':
         if (editor) {
@@ -743,6 +744,7 @@ const ICON = {
   save: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 3.5h10l2.5 2.5v10.5h-12.5zM7 3.5v4h6v-4M6.5 16.5v-5h7v5"/></svg>',
   terminal: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M3.5 4.5h13v11h-13zM6.5 8l2.5 2-2.5 2M10.5 12h3"/></svg>',
   sliders: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 6h12M4 10h12M4 14h12"/><circle cx="7" cy="6" r="1.6" fill="currentColor"/><circle cx="13" cy="10" r="1.6" fill="currentColor"/><circle cx="9" cy="14" r="1.6" fill="currentColor"/></svg>',
+  layout: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M2.5 3.5h15v13h-15zM2.5 8h15M9 8v8.5M14 8v8.5"/></svg>',
   theme: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="5.5"/><path d="M10 4.5v11A5.5 5.5 0 0 0 10 4.5z" fill="currentColor"/></svg>',
 };
 

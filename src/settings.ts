@@ -27,16 +27,37 @@ export interface Settings {
   layout: LayoutSettings;
 }
 
+/** 下の欄に置けるもの */
+export type TabId = 'analysis' | 'score' | 'winrate';
+
+export const ALL_TABS: TabId[] = ['analysis', 'score', 'winrate'];
+
+/** 下の欄の 1 つ。タブを何枚か持ち、そのうち 1 枚を開いている */
+export interface PaneSettings {
+  tabs: TabId[];
+  active: TabId;
+  /** 横幅の取り分（欄どうしの比） */
+  ratio: number;
+}
+
 export interface LayoutSettings {
   /** 棋譜の欄の幅（px） */
   recordWidth: number;
   /** 下の欄の高さ（px） */
   bottomHeight: number;
-  /** 下の欄で開いているタブ */
-  tab: 'analysis' | 'score' | 'winrate';
+  /** 下の欄の並び。左から順に */
+  panes: PaneSettings[];
 }
 
-export const DEFAULT_LAYOUT: LayoutSettings = { recordWidth: 320, bottomHeight: 270, tab: 'analysis' };
+/** 既定は 2 欄。候補手（検討）とグラフを同時に見られるようにする */
+export const DEFAULT_LAYOUT: LayoutSettings = {
+  recordWidth: 320,
+  bottomHeight: 270,
+  panes: [
+    { tabs: ['analysis'], active: 'analysis', ratio: 0.56 },
+    { tabs: ['score', 'winrate'], active: 'score', ratio: 0.44 },
+  ],
+};
 
 export function defaultSettings(): Settings {
   return {
@@ -122,15 +143,46 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
   return s;
 }
 
-function mergeLayout(raw: Partial<LayoutSettings> | undefined): LayoutSettings {
+/** 既定の並びを複製する（設定を書き換えても定数が壊れないように） */
+export function defaultPanes(): PaneSettings[] {
+  return DEFAULT_LAYOUT.panes.map((p) => ({ tabs: [...p.tabs], active: p.active, ratio: p.ratio }));
+}
+
+/**
+ * 保存された割りつけを読む。壊れた値と、古い形（タブ 1 枚を覚えるだけの `tab`）を受ける。
+ * タブは全部ちょうど 1 か所に居ることを保証する（欠けたら最後の欄へ、重複は先に出たほうを残す）。
+ */
+function mergeLayout(raw: (Partial<LayoutSettings> & { tab?: string }) | undefined): LayoutSettings {
   const d = DEFAULT_LAYOUT;
-  if (!raw) return { ...d };
   const num = (v: unknown, fallback: number, lo: number, hi: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
+  const panes: PaneSettings[] = [];
+  const seen = new Set<TabId>();
+  for (const p of Array.isArray(raw?.panes) ? raw!.panes! : []) {
+    const tabs = (Array.isArray(p?.tabs) ? p.tabs : []).filter((t): t is TabId => ALL_TABS.includes(t as TabId) && !seen.has(t as TabId));
+    if (tabs.length === 0) continue;
+    for (const t of tabs) seen.add(t);
+    panes.push({
+      tabs,
+      active: tabs.includes(p.active as TabId) ? (p.active as TabId) : tabs[0]!,
+      ratio: typeof p.ratio === 'number' && p.ratio > 0 && Number.isFinite(p.ratio) ? p.ratio : 1,
+    });
+  }
+  if (panes.length === 0) {
+    // 古い形。開いていたタブを、既定の並びの中で開き直す
+    panes.push(...defaultPanes());
+    const legacy = ALL_TABS.find((t) => t === raw?.tab);
+    if (legacy) for (const p of panes) if (p.tabs.includes(legacy)) p.active = legacy;
+    for (const p of panes) for (const t of p.tabs) seen.add(t);
+  }
+  // 知らないうちに増えたタブは最後の欄へ
+  for (const t of ALL_TABS) if (!seen.has(t)) panes[panes.length - 1]!.tabs.push(t);
+  const sum = panes.reduce((a, p) => a + p.ratio, 0) || 1;
+  for (const p of panes) p.ratio = p.ratio / sum;
   return {
-    recordWidth: num(raw.recordWidth, d.recordWidth, 200, 900),
-    bottomHeight: num(raw.bottomHeight, d.bottomHeight, 100, 1200),
-    tab: raw.tab === 'score' || raw.tab === 'winrate' ? raw.tab : 'analysis',
+    recordWidth: num(raw?.recordWidth, d.recordWidth, 200, 900),
+    bottomHeight: num(raw?.bottomHeight, d.bottomHeight, 100, 2000),
+    panes,
   };
 }
 

@@ -39,7 +39,8 @@ export const MAX_SCORE = 2000;
 
 const PAD_L = 46;
 const PAD_R = 14;
-const TOP = 16;
+/** 折れ線を描く枠の上端。凡例はこの上の余白に置く（布石・本将棋の見出しと重ならないように） */
+const TOP = 20;
 const PAD_B = 22;
 
 const SERIES: { key: EvalSource; label: string }[] = [
@@ -52,11 +53,10 @@ export class TenbinGraph {
   private maxPly = 60;
   private svg: SVGSVGElement | null = null;
   private last: GraphInput | null = null;
-  private type_: ChartType = 'winrate';
   /** グラフを押したときに呼ぶ。ply はいちばん近い手数 */
   onSeek: ((ply: number) => void) | null = null;
 
-  constructor(private readonly root: HTMLElement) {
+  constructor(private readonly root: HTMLElement, private readonly type_: ChartType) {
     root.innerHTML = '';
     root.addEventListener('click', (e) => {
       if (!this.svg || !this.onSeek) return;
@@ -74,11 +74,6 @@ export class TenbinGraph {
 
   get type(): ChartType {
     return this.type_;
-  }
-
-  setType(t: ChartType): void {
-    this.type_ = t;
-    if (this.last) this.render(this.last);
   }
 
   render(input: GraphInput): void {
@@ -140,6 +135,8 @@ export class TenbinGraph {
     const labelRight = cx < W - 130;
     const legend = series.filter((s) => s.n > 0).map((s) => `<tspan class="lg ${s.key}">━</tspan> ${s.label}`);
     if (approx) legend.push('<tspan class="lg approx">○</tspan> 勝率からの換算');
+    // 狭い欄では凡例を畳む（線の色だけで読める）
+    const showLegend = legend.length > 0 && W > 380;
 
     this.root.innerHTML = `
 <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="tenbin" aria-label="${score ? '評価値' : '期待勝率'}のグラフ" role="img">
@@ -151,7 +148,7 @@ export class TenbinGraph {
   ${rows.map((r) => `<text class="axis" x="${x(0) - 6}" y="${(r.y + 4).toFixed(1)}" text-anchor="end">${r.text}</text>`).join('')}
   ${ticks.map((t) => `<text class="axis" x="${x(t).toFixed(1)}" y="${BOTTOM + 14}" text-anchor="middle">${t}</text>`).join('')}
   ${fusekiEnd > 0 ? `<text class="axis label" x="${x(fusekiEnd / 2).toFixed(1)}" y="${TOP + 12}" text-anchor="middle">布石</text><text class="axis label" x="${(x(fusekiEnd) + 6).toFixed(1)}" y="${TOP + 12}">本将棋</text>` : ''}
-  ${legend.length ? `<text class="axis legend" x="${W - PAD_R}" y="${TOP + 12}" text-anchor="end">${legend.join('　')}</text>` : ''}
+  ${showLegend ? `<text class="axis legend" x="${W - PAD_R}" y="13" text-anchor="end">${legend.join('　')}</text>` : ''}
   ${series.map((s) => s.path).join('')}${series.map((s) => s.dots).join('')}
   <line class="cursor" x1="${cx.toFixed(1)}" y1="${TOP}" x2="${cx.toFixed(1)}" y2="${BOTTOM}" />
   ${curLabel ? `<text class="axis current" x="${(labelRight ? cx + 5 : cx - 5).toFixed(1)}" y="${BOTTOM - 5}" text-anchor="${labelRight ? 'start' : 'end'}">${curLabel}</text>` : ''}
