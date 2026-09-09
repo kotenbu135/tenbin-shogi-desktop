@@ -488,10 +488,10 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .cand-table td { padding: 3px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--rule); }
 .cand-table tr:hover td { background: var(--panel-2); }
 .cand-table .c-rank { color: var(--ink-3); }
-.cand-table .c-depth, .cand-table .c-nodes { color: var(--ink-2); font-size: 12px; }
+.cand-table .c-depth { color: var(--ink-2); font-size: 12px; }
 .cand-table .c-score { font-weight: 600; min-width: 4.5em; }
 .cand-table .c-score.approx { font-weight: 400; color: var(--ink-2); }
-.cand-table .c-p { min-width: 8em; }
+.cand-table .c-p { min-width: 7.4em; }
 .cand-table th.c-pv, .cand-table td.c-pv {
   width: 100%; max-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis;
   font-family: var(--font-serif); font-size: 14px; user-select: text; -webkit-user-select: text;
