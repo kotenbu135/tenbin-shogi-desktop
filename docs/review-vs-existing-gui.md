@@ -224,3 +224,22 @@ DOUBLE 以上では**下の欄が左右に割れて、検討とグラフが同�
 - 署名の秘密鍵はリポジトリに入れない。`~/tenbin-keys/tenbin-updater.key` に置いた。
   GitHub の Secrets（`TAURI_SIGNING_PRIVATE_KEY`）に中身を入れる。**無くすと更新を配れなくなる**
 - 公開鍵は `src-tauri/tauri.conf.json` の `plugins.updater.pubkey`。これを変えると古い版から更新できなくなる
+
+
+## 配布で踏んだ罠（2026-09-09、v0.2.0 の初回配布）
+
+Windows のビルドが 4 回落ちた。次に触る人のために。
+
+1. **MSI（WiX）が `light.exe` で落ちる**。`天秤将棋_0.2.0_x64_en-US.msi` を作るところ。
+   自動更新が使うのは NSIS なので、CI は `args: --bundles nsis` で NSIS だけ作る
+   （`tauri.conf.json` の `targets` は `all` のままにして、ローカルのビルドは変えない）
+2. **GitHub はアセット名から日本語を落とす**。`天秤将棋_0.2.0_x64-setup.exe` → `_0.2.0_x64-setup.exe`。
+   そのせいで tauri-action が対応する `.sig` を名前で引けず、
+   `Signature not found for the updater JSON. Skipping upload...` と言って **latest.json を上げない**。
+   → `includeUpdaterJson: false` にして、**自分で** 読める名前を付け直し、latest.json を組み立てる。
+   URL は `…/releases/download/<タグ>/<名前>` の形（下書きのときの `untagged-…` を使ってはいけない）
+3. `target` は**ワークスペースの根**にある（`crates/usi-host` と `src-tauri` で共有）。`src-tauri/target` ではない
+4. `set -o pipefail` の下で `ls A B`（片方が無い）は終了コード 2 を返し、ステップごと落ちる。`find` で探す
+
+配布の最後は**人が Release を publish する**。`releases/latest` は公開済みのものしか指さないので、
+下書きのままでは利用者のアプリから見えない。
