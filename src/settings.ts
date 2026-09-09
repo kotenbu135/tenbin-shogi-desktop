@@ -21,10 +21,12 @@ export interface Settings {
   analysisSlots: string[];
   /** 内蔵の布石評価の方式 */
   builtinMethod: 'value' | 'twoply';
+  /** 棋譜解析の 1 局面の秒数 */
+  kifuAnalysisSec: number;
 }
 
 export function defaultSettings(): Settings {
-  return { engines: [], theme: 'system', fusekiEngineId: BUILTIN_ID, analysisMultiPv: 3, analysisSlots: ['auto'], builtinMethod: 'value' };
+  return { engines: [], theme: 'system', fusekiEngineId: BUILTIN_ID, analysisMultiPv: 3, analysisSlots: ['auto'], builtinMethod: 'value', kifuAnalysisSec: 2 };
 }
 
 const KEY = 'settings';
@@ -90,6 +92,7 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     analysisMultiPv: saved.analysisMultiPv ?? d.analysisMultiPv,
     analysisSlots: Array.isArray(saved.analysisSlots) && saved.analysisSlots.length ? saved.analysisSlots : d.analysisSlots,
     builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
+    kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,
   };
   if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
   if (s.fusekiEngineId !== BUILTIN_ID && !engines.some((e) => e.id === s.fusekiEngineId)) s.fusekiEngineId = BUILTIN_ID;

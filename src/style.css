@@ -16,6 +16,8 @@
   --ink-3: #8c9096;
   --sente: #b93c2c;
   --gote: #2f4e73;
+  /* 検討・棋譜解析の系列（グラフ）。先後の朱・藍と混ざらない色 */
+  --analysis: #2b8a63;
   /* 盤。公開版サイトと同じ値。明暗で変えない（駒の朱字と成駒の判別が落ちる） */
   --board: #f9b34e;
   --board-edge: #6f5027;
@@ -46,6 +48,7 @@
     --ink-3: #7f8489;
     --sente: #d65a48;
     --gote: #6e93c0;
+    --analysis: #5cc49a;
     --board-edge: #2b2018;
     --stand-edge: #221a10;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -63,6 +66,7 @@
   --ink-3: #7f8489;
   --sente: #d65a48;
   --gote: #6e93c0;
+  --analysis: #5cc49a;
   --board-edge: #2b2018;
   --stand-edge: #221a10;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -265,8 +269,8 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 
 /* 駒台。後手は左上（盤の上端に揃える）、先手は右下（盤の下端に揃える） */
 .stand { display: flex; flex-direction: column; gap: 6px; width: calc(var(--sq) * 2.3); }
-.stand.gote { align-self: start; margin-top: calc(var(--sq) * 0.5); }
-.stand.sente { align-self: end; }
+.stand.far { align-self: start; margin-top: calc(var(--sq) * 0.5); }
+.stand.near { align-self: end; }
 .stand-pieces {
   display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
   padding: calc(var(--sq) * 0.08);
@@ -299,40 +303,37 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
   padding: 0 4px; color: #fff; background: rgba(0, 0, 0, 0.62); border-radius: 3px;
 }
 .plate {
-  display: flex; align-items: center; gap: 0.4em;
+  /* 1 行目に印・名前・手番、2 行目に時計。名前が縮んで縦に折れないよう、列は minmax(0, 1fr) */
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 0.4em;
   padding: 0.25em 0.6em;
   font-size: calc(var(--sq) * 0.3);
   background: var(--panel); border: 1px solid var(--rule-strong);
   color: var(--ink);
 }
 .plate-mark { font-size: 0.95em; }
-.plate-name { flex: 1; }
-.plate-turn { font-size: 0.72em; padding: 0 0.5em; background: var(--ink); color: var(--bg); border-radius: 2px; }
+.plate-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plate-turn { font-size: 0.72em; padding: 0 0.5em; background: var(--ink); color: var(--bg); border-radius: 2px; white-space: nowrap; }
 .plate.to-move { border-color: var(--ink); }
 
-/* 天秤グラフ */
-.graph { height: 150px; background: var(--panel); border: 1px solid var(--rule); }
+/* 評価グラフ */
+.graph { height: 150px; background: var(--panel); border: 1px solid var(--rule); cursor: pointer; }
 .tenbin { width: 100%; height: 100%; display: block; }
-.tenbin .scale .base, .tenbin .scale .post, .tenbin .scale .arm, .tenbin .scale .string {
-  fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-}
-.tenbin .scale .base { fill: var(--ink); stroke-width: 3; }
-.tenbin .scale .arm { stroke-width: 3; }
-.tenbin .scale .string { stroke-width: 1; }
-.tenbin .scale > g { transition: transform 400ms ease; }
-.tenbin .pan.sente .dish { fill: var(--sente); stroke: none; }
-.tenbin .pan.gote .dish { fill: var(--panel); stroke: var(--gote); stroke-width: 2; }
-.tenbin .pan-label { font-size: 12px; fill: var(--ink-2); font-family: var(--font-ui); }
 .tenbin .band.fuseki { fill: var(--panel-2); }
 .tenbin .axis-line { stroke: var(--rule-strong); stroke-width: 1; }
 .tenbin .mid { stroke: var(--rule-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .tenbin .edge { stroke: var(--rule-strong); stroke-width: 1; }
 .tenbin .axis { font-size: 10px; fill: var(--ink-3); font-family: var(--font-ui); }
 .tenbin .axis.label { font-size: 11px; fill: var(--ink-2); }
-.tenbin .line { fill: none; stroke: var(--ink); stroke-width: 1.5; }
-.tenbin .pt { fill: var(--sente); }
+.tenbin .axis.legend { font-size: 11px; fill: var(--ink-2); }
+.tenbin .axis.current { font-size: 11px; fill: var(--ink); }
+.tenbin .lg.play { fill: var(--ink); }
+.tenbin .lg.analysis { fill: var(--analysis); }
+.tenbin .line { fill: none; stroke-width: 1.5; }
+.tenbin .line.play { stroke: var(--ink); }
+.tenbin .line.analysis { stroke: var(--analysis); }
+.tenbin .pt.play { fill: var(--ink); }
+.tenbin .pt.analysis { fill: var(--analysis); }
 .tenbin .cursor { stroke: var(--gote); stroke-width: 1.5; }
-@media (prefers-reduced-motion: reduce) { .tenbin .scale > g { transition: none; } }
 
 /* 右列 */
 .side-head { padding: 10px 12px; }
@@ -362,7 +363,8 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 
 /* 列は minmax(0, 1fr)。auto だと select の固有幅（長いエンジン名）が列を押し広げ、右端が切れる */
 .analysis { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
-.analysis-head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+.analysis-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 12px; }
+.analysis-tools { display: flex; gap: 14px; align-items: center; padding: 0 12px 8px; border-bottom: 1px solid var(--rule); font-size: 12px; }
 .analysis-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .analysis-head button { flex: none; white-space: nowrap; }
 .analysis-status { display: flex; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 12px; color: var(--ink-3); }
@@ -437,8 +439,7 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .shape .badge-text { fill: #fff; font-size: 20px; font-family: var(--font-ui); font-weight: 600; }
 
 /* ---- 時計 ---- */
-.plate { flex-wrap: wrap; }
-.plate-clock { margin-left: auto; font-feature-settings: 'tnum' 1; color: var(--ink-2); font-size: 0.95em; }
+.plate-clock { grid-column: 1 / -1; text-align: right; font-feature-settings: 'tnum' 1; color: var(--ink-2); font-size: 1.05em; line-height: 1.3; }
 .plate-clock.running { color: var(--ink); font-weight: 600; }
 .plate-clock.byoyomi.running { color: var(--sente); }
 
@@ -479,7 +480,7 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .form-hint { align-self: end; padding-bottom: 6px; }
 
 /* ---- 検討の枠（複数エンジン） ---- */
-.analysis { grid-template-rows: auto auto minmax(0, 1fr); }
+.analysis { grid-template-rows: auto auto auto auto minmax(0, 1fr); }
 .analysis-head .multipv { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-2); }
 .analysis-head .multipv input { width: 3.2em; }
 .analysis-head .link { white-space: nowrap; }
@@ -490,8 +491,17 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .aslot-head select { flex: 1 1 0; width: 0; min-width: 0; }
 .aslot-remove { color: var(--ink-3); }
 .slots .analysis-table { overflow: visible; }
-.thinking { padding: 4px 12px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--rule); font-family: var(--font-serif); }
-.thinking[hidden] { display: none; }
+.analysis-slot.player .aslot-head { padding-top: 8px; }
+.player-label { font-weight: 600; }
+.analysis-slot.player { background: var(--panel-2); }
+.analysis-progress { padding: 6px 12px; color: var(--ink-2); background: var(--panel-2); border-bottom: 1px solid var(--rule); }
+.analysis-progress[hidden] { display: none; }
+.analysis-progress .link { margin-left: 6px; }
+.result { margin-top: 6px; }
+.result strong { margin-right: 6px; }
+.result-hint { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.sec-row { display: flex; gap: 8px; align-items: center; }
+.sec-row input { width: 6em; }
 
 /* ---- エンジンの登録（申告から作る設定画面） ---- */
 .engine-default { font-size: 11px; padding: 1px 6px; margin-left: 6px; border: 1px solid var(--ink); border-radius: 2px; font-weight: 400; }

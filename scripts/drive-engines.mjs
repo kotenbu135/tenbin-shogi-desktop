@@ -59,7 +59,7 @@ await evAsync(`window.tenbin.play({ mode: 'tenbin', seats: [
 const t0 = Date.now();
 let n = 0;
 for (let t = 0; t < 180; t++) { await sleep(1000); n = await ev('window.tenbin.game().moves.length'); if (n >= 47 || (await ev('window.tenbin.game().phase')) === 'over') break; }
-console.log('対局:', await status(), '| 手数', n, '|', ((Date.now() - t0) / 1000).toFixed(1), '秒 | 思考表示:', await ev('document.getElementById("thinking").textContent'));
+console.log('対局:', await status(), '| 手数', n, '|', ((Date.now() - t0) / 1000).toFixed(1), '秒 | 思考表示:', await ev('[...document.querySelectorAll(".analysis-slot.player")].map((s) => s.querySelector(".player-label").textContent + " / " + s.querySelector(".engine-name").textContent + " / " + s.querySelectorAll(".cand").length + "候補 / " + (s.querySelector(".cand .pv")?.textContent || "").slice(0, 40)).join(" || ")'), '| 対局の点:', await ev('window.tenbin.evals().filter((e) => e.source === "play").length'));
 console.log('棋譜の末尾:', await ev('[...document.querySelectorAll(".kifu-move")].slice(-4).map(e=>e.textContent.replace(/\\s+/g," ").trim()).join(" / ")'));
 await shot(`${OUT}/play-engine.png`);
 }

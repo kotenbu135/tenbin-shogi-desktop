@@ -4,6 +4,7 @@
 布石の段階から評価値を出し、手元の PC のエンジンで検討する。
 
 - 設計の検討: [docs/plan-desktop-gui.md](docs/plan-desktop-gui.md)
+- 既存の GUI との比較と問題点: [docs/review-vs-existing-gui.md](docs/review-vs-existing-gui.md)
 - 布石 USI 拡張: [docs/usi-fuseki-extension.md](docs/usi-fuseki-extension.md)
 - 画面の設計: [docs/design.md](docs/design.md)
 - モデルの配布: [docs/plan-model-distribution.md](docs/plan-model-distribution.md)
@@ -16,9 +17,11 @@
 - 盤・駒台・名札・棋譜（連盟の符号、局面の移動、分岐）・待った・投了、41 手目の裁定。駒は公開版と同じ kanji_light
 - USI エンジンの登録。何本でも。`usi` の申告から設定画面を作る（Threads・USI_Hash・EvalDir も申告の 1 項目）。エンジンのフォルダから一括で取り込める。評価値→勝率の目盛りはエンジンごと
 - 布石の評価を内蔵（方策・価値ネット・両玉の価値表を onnxruntime-web で）。エンジンが無くても 1〜40 手目の検討と AI の布石が動く
-- 検討: 枠を足して複数のエンジンで同じ局面を並べて検討できる。「自動」の枠は布石中は内蔵、41 手目からは既定のエンジンに切り替わる。候補の行き先を盤に矢印と印で示す
+- 検討: 枠を足して複数のエンジンで同じ局面を並べて検討できる。「自動」の枠は布石中は内蔵、41 手目からは既定のエンジンに切り替わる。候補の行き先を盤に矢印と印で示す。終局した局面も検討できる
+- 対局中の読み: 手番のエンジンの読み筋・深さ・ノード数を検討パネルの「対局の枠」に出す（ShogiHome と同じく、思考と検討は同じ欄）
+- 棋譜解析: 棋譜の局面を順に評価してグラフを埋める（範囲と 1 局面の秒数を指定。布石は内蔵、41 手目からは既定のエンジン）
 - 対局: 席ごとに人かエンジンか。布石は内蔵の方策（強さ 1〜5）か布石対応のエンジン、本将棋は登録したどのエンジンでも
-- 天秤グラフ（先手勝率の折れ線と、現局面で傾く梁）
+- 評価グラフ（先手勝率の折れ線。対局中の評価と検討の評価を別の線で。押すとその手数の局面へ）
 - 対局時計（持ち時間と秒読み。消費時間を棋譜に残す）
 - KIF の保存と読み込み。対局全体（布石を含む、このアプリの方言）と、本将棋の部分だけ（局面図つきの普通の KIF。将棋所や ShogiHome で開ける）
 - 局面編集（任意の局面から本将棋を始める）、盤面反転
@@ -62,6 +65,7 @@ npm run tauri build      # 配布物
 npm run build && npm run preview          # http://localhost:4173
 node scripts/smoke-preview.mjs /tmp       # ブラウザで両玉→布石→本将棋→待ったを通す
 node scripts/smoke-builtin.mjs /tmp       # 内蔵の布石評価・複数枠の検討・内蔵同士の自動対局
+node scripts/smoke-review.mjs /tmp        # 対局の枠・対局中のグラフ・終局後の検討・棋譜解析・グラフの押下
 WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 npm run tauri dev   # 別の端末で
 node scripts/drive-app.mjs /tmp           # 動いているアプリを操作し、登録済みエンジンで検討まで通す
 node scripts/drive-engines.mjs /tmp <エンジン>  # 申告の読み取り→登録→エンジン同士の対局→複数枠の検討
@@ -97,4 +101,4 @@ Windows 側に Rust と Node.js を入れて `npm run tauri dev`。
 
 ## ライセンス
 
-GPL-3.0-only。wasm は dlshogi（GPL-3.0）由来。shogiops は MIT。
+GPL-3.0-only。wasm は dlshogi（GPL-3.0）由来。shogiops は GPL-3.0-or-later。詳しくは THIRD_PARTY.md。

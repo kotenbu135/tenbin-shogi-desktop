@@ -8,7 +8,7 @@
 
 import type { Game, Color } from '../state/game.ts';
 import type { Clock } from '../state/clock.ts';
-import type { Thinker } from '../usi/engine.ts';
+import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { BuiltinEvaluator } from '../eval/builtin.ts';
 import { BUILTIN_ID } from '../settings.ts';
@@ -24,7 +24,11 @@ export interface PlayDeps {
   createThinker(id: string, processTag: string): Thinker | null;
   say(text: string, error?: boolean): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
-  onThinking(color: Color, info: UsiInfo | null): void;
+  /** 席のエンジンが考え始めた（読みは検討パネルの「対局の枠」へ） */
+  onThinkStart(seat: 0 | 1, color: Color, cfg: EngineConfig): void;
+  onThinking(seat: 0 | 1, info: UsiInfo): void;
+  /** 指した、または中断した */
+  onThinkEnd(seat: 0 | 1, state: string): void;
 }
 
 export class MatchDriver {
@@ -33,6 +37,8 @@ export class MatchDriver {
   private thinkers = new Map<string, Thinker>();
   private gen = 0;
   private pendingKey: string | null = null;
+  /** 読みを出している席（中断のときに枠を閉じる） */
+  private thinkingSeat: 0 | 1 | null = null;
 
   constructor(private readonly deps: PlayDeps) {}
 
@@ -54,6 +60,7 @@ export class MatchDriver {
   async abort(): Promise<void> {
     this.gen++;
     this.pendingKey = null;
+    this.endThinking('中断');
     this.seats = null;
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
   }
@@ -62,6 +69,7 @@ export class MatchDriver {
   interrupt(): void {
     this.gen++;
     this.pendingKey = null;
+    this.endThinking('中断');
     for (const t of this.thinkers.values()) void t.stop();
     this.kick();
   }
@@ -71,6 +79,13 @@ export class MatchDriver {
     const all = [...this.thinkers.values()];
     this.thinkers.clear();
     await Promise.all(all.map((t) => t.quit()));
+  }
+
+  private endThinking(state: string): void {
+    if (this.thinkingSeat === null) return;
+    const seat = this.thinkingSeat;
+    this.thinkingSeat = null;
+    this.deps.onThinkEnd(seat, state);
   }
 
   /** 席の名前を先手・後手に写す。天秤将棋で先後が決まる前は席 A を先手の欄に置く */
@@ -84,6 +99,11 @@ export class MatchDriver {
       return { sente: a ? `${a}（玉を置く）` : '', gote: b ? `${b}（先後を選ぶ）` : '' };
     }
     return { sente: a, gote: b };
+  }
+
+  /** 席の名前（空なら ''） */
+  seatName(seat: 0 | 1): string {
+    return this.names[seat];
   }
 
   seatOfColor(color: Color): 0 | 1 {
@@ -123,20 +143,30 @@ export class MatchDriver {
     if (this.pendingKey === key) return;
     this.pendingKey = key;
     const gen = this.gen;
-    const color = g.turn;
     try {
       const token = await this.think(cur.seat, cur.spec);
       if (gen !== this.gen || !this.deps.live()) return;
       if (this.pendingKey !== key) return;
       this.pendingKey = null;
-      this.deps.onThinking(color, null);
+      this.endThinking('指した');
       if (token) this.deps.apply(token);
     } catch (e) {
       if (gen !== this.gen) return;
       this.pendingKey = null;
-      this.deps.onThinking(color, null);
+      this.endThinking('止まった');
       this.deps.say(`エンジンが指せない: ${e instanceof Error ? e.message : String(e)}`, true);
     }
+  }
+
+  /** 読みを検討パネルへ流す準備。同じ席の前の読みは閉じる */
+  private beginThinking(seat: 0 | 1, color: Color, cfg: EngineConfig): (info: UsiInfo) => void {
+    this.endThinking('指した');
+    this.thinkingSeat = seat;
+    this.deps.onThinkStart(seat, color, cfg);
+    const gen = this.gen;
+    return (info) => {
+      if (gen === this.gen && this.thinkingSeat === seat) this.deps.onThinking(seat, info);
+    };
   }
 
   private thinker(seat: 0 | 1, id: string): Thinker {
@@ -171,7 +201,7 @@ export class MatchDriver {
         await th.start();
         await th.newGame();
       }
-      const bm = await th.go(g.positionCommand(), this.goArgs(spec), (info) => this.deps.onThinking(color, info));
+      const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
       if (bm.move === 'resign') return 'resign';
       if (bm.move === 'win') {
         this.deps.say(`${th.config.name} が入玉宣言をしました（このアプリでは扱えないので投了として記録します）`, true);
@@ -191,6 +221,14 @@ export class MatchDriver {
     }
     if (spec.fusekiId === BUILTIN_ID || phase === 'kings') {
       if (!builtin) throw new Error('内蔵の布石評価が読み込まれていない');
+      // 候補と勝率を対局の枠とグラフに出してから、温度で 1 手を選ぶ（選ぶ手は 1 位とは限らない）
+      const onInfo = this.beginThinking(seat, color, builtin.config);
+      try {
+        await builtin.start();
+        await builtin.goInfinite(g.positionCommand(), onInfo);
+      } catch (e) {
+        this.deps.onLog('内蔵の布石評価', 'sys', `候補を出せない: ${e instanceof Error ? e.message : String(e)}`);
+      }
       return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin });
     }
     const th = this.thinker(seat, spec.fusekiId);
@@ -199,7 +237,7 @@ export class MatchDriver {
       await th.start();
       await th.newGame();
     }
-    const bm = await th.go(g.positionCommand(), this.goArgs(spec), (info) => this.deps.onThinking(color, info));
+    const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
     return bm.move === 'resign' ? 'resign' : bm.move;
   }
 }

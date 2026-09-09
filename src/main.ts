@@ -3,13 +3,14 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
-import { Game, rebuild, squareText, colorName, type Mode, type ViewState, type Color } from './state/game.ts';
+import { Game, rebuild, squareText, colorName, colorMark, type Mode, type ViewState, type Color } from './state/game.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
 import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
-import { TenbinGraph, type EvalPoint } from './ui/graph.ts';
+import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { KifuList } from './ui/kifu.ts';
-import { AnalysisPanel } from './ui/analysis.ts';
+import { AnalysisPanel, type Target } from './ui/analysis.ts';
+import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
 import { UsiConsole } from './ui/console.ts';
 import { EngineDialog } from './ui/engines.ts';
 import { NewGameDialog, type NewGameChoice } from './ui/newgame.ts';
@@ -17,7 +18,6 @@ import { PositionEditor } from './ui/editor.ts';
 import { MatchDriver } from './ui/play.ts';
 import { UsiEngine, isTauri, type Thinker } from './usi/engine.ts';
 import { BuiltinEvaluator } from './eval/builtin.ts';
-import type { UsiInfo } from './usi/parse.ts';
 import { parseKif, writeKif, writeNormalOnlyKif } from './kif/tenbin-kif.ts';
 import type { Role as OpsRole } from 'shogiops/types';
 
@@ -54,7 +54,8 @@ async function main(): Promise<void> {
   let clock = new Clock(null);
   /** 表示している局面。null は最新。数値は「何手目まで」 */
   let cursor: number | null = null;
-  const evals = new Map<number, EvalPoint>();
+  /** 手数ごとの評価。対局の系列と検討の系列を別に持つ（鍵は "source:ply"） */
+  const evals = new Map<string, EvalPoint>();
   let shapes: Shape[] = [];
   let editor: PositionEditor | null = null;
 
@@ -83,13 +84,25 @@ async function main(): Promise<void> {
     return new UsiEngine(cfg, `${cfg.id}-${processTag}`);
   }
 
+  function setEval(ply: number, p: number, source: EvalSource): void {
+    evals.set(`${source}:${ply}`, { ply, p, source });
+  }
+
+  /** 表示中の手数の評価。検討の値を優先し、無ければ対局中の値 */
+  function evalAt(ply: number): number | null {
+    return evals.get(`analysis:${ply}`)?.p ?? evals.get(`play:${ply}`)?.p ?? null;
+  }
+
   const analysis = new AnalysisPanel($('analysis'), {
     settings: () => settings,
     save: () => saveSettings(settings),
     createThinker,
-    onEvaluation: (ply, pSente, lines) => {
-      evals.set(ply, { ply, p: pSente });
-      paintGraph(pSente);
+    onEvaluation: (ply, pSente, lines, source) => {
+      setEval(ply, pSente, source);
+      const v = lastView ?? currentView();
+      paintGraph(ply === v.ply ? pSente : null);
+      // 矢印は検討の候補だけ。対局中のエンジンの読みは盤に出さない（人が相手のとき、手を先に見せない）
+      if (source !== 'analysis') return;
       shapes = [];
       for (const l of lines.slice(0, 3)) {
         const mv = l.pv[0];
@@ -102,8 +115,50 @@ async function main(): Promise<void> {
     },
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
     openEngineSettings: () => engineDialog.open(),
-    pvText: (usis) => viewGame().japanesePv(usis),
+    onKifuAnalysis: () => void kifuAnalysis(),
+    pvText: (usis, t) => gameForPv(t).japanesePv(usis),
   });
+
+  const kifuAnalyzer = new KifuAnalyzer({
+    settings: () => settings,
+    createThinker,
+    targets: () => {
+      const out: { index: number; target: Target }[] = [];
+      for (let i = 0; i <= game.moves.length; i++) {
+        const v = game.viewAt(i);
+        if (v.phase === 'choose') continue;
+        out.push({ index: i, target: targetOf(v) });
+      }
+      return out;
+    },
+    onPoint: (ply, p) => {
+      setEval(ply, p, 'analysis');
+      paintGraph(null);
+    },
+    onProgress: (text) => analysis.setProgress(text, text ? () => void kifuAnalyzer.stop() : undefined),
+    onLog: (_name, dir, text) => usiConsole.append(dir, text),
+  });
+
+  async function kifuAnalysis(): Promise<void> {
+    if (kifuAnalyzer.running) {
+      await kifuAnalyzer.stop();
+      return;
+    }
+    if (game.moves.length === 0) {
+      say('棋譜がまだありません', true);
+      return;
+    }
+    if (driver.active && game.phase !== 'over' && !confirm('対局中です。エンジンと解析で計算を取り合いますが、棋譜解析を始めますか')) return;
+    const cursorPly = cursor === null ? 0 : currentView().ply;
+    const o = await askKifuAnalysis($('dialogs'), { secPerMove: settings.kifuAnalysisSec, hasCursor: cursor !== null, cursorPly });
+    if (!o) return;
+    settings.kifuAnalysisSec = o.secPerMove;
+    void saveSettings(settings);
+    const fromIndex = o.fromIndex < 0 ? cursor ?? 0 : 0;
+    const t0 = performance.now();
+    const n = await kifuAnalyzer.run({ fromIndex, secPerMove: o.secPerMove });
+    if (n > 0) say(`棋譜解析: ${n} 局面を ${((performance.now() - t0) / 1000).toFixed(0)} 秒で評価しました`);
+  }
   usiConsole.onSend = (line) => analysis.sendRaw(line);
 
   const driver = new MatchDriver({
@@ -115,10 +170,38 @@ async function main(): Promise<void> {
     createThinker,
     say: (text, error) => say(text, error),
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
-    onThinking: (color, info) => paintThinking(color, info),
+    onThinkStart: (seat, color, cfg) => {
+      // 先後が決まる前（両玉を置く間）は席の名前で、決まってからは先後の印と名前で
+      const label = game.mode === 'tenbin' && !game.chosenColor
+        ? `${driver.seatName(seat) || (seat === 0 ? '席 A' : '席 B')}（玉を置く）`
+        : `${colorMark(color)} ${names()[color] || colorName(color)}`;
+      analysis.beginPlayer(seat, label, cfg, targetOf(game.view()));
+    },
+    onThinking: (seat, info) => analysis.playerInfo(seat, info),
+    onThinkEnd: (seat, state) => analysis.endPlayer(seat, state),
   });
 
   const graph = new TenbinGraph(graphEl);
+  graph.onSeek = (ply) => {
+    if (editor) return;
+    // その手数までの棋譜の位置へ。手数を持たない行（先後の選択）は飛ばす
+    let idx = 0;
+    game.moves.forEach((m, i) => {
+      if (m.ply !== null && m.ply <= ply) idx = i + 1;
+    });
+    cursor = idx >= game.moves.length ? null : idx;
+    board.clearSelection();
+    paintAll();
+  };
+
+  /** 検討に渡す局面。終局した局面も、その段階のルールで検討できるよう stage を添える */
+  function targetOf(v: ViewState): Target {
+    let stage: Target['stage'];
+    if (v.phase !== 'over') stage = v.phase;
+    else if (game.mode === 'position' || v.ply >= 40) stage = 'normal';
+    else stage = game.mode === 'tenbin' && v.ply < 2 ? 'kings' : 'fuseki';
+    return { positionCmd: v.positionCmd, phase: v.phase, stage, turn: v.turn, ply: v.ply };
+  }
   const kifu = new KifuList($('kifu'), {
     onSeek: (c) => {
       if (editor) return;
@@ -148,7 +231,28 @@ async function main(): Promise<void> {
   function viewGame(): Game {
     if (cursor === null) return game;
     const g = rebuild(fuseki, game.mode, game.tokens().slice(0, cursor), { startSfen: game.normalStartSfen ?? undefined });
-    game.viewAt(game.moves.length); // wasm を最新に戻す
+    game.resync(); // wasm を最新に戻す
+    return g;
+  }
+
+  /**
+   * 読み筋の符号化に使う、検討の対象の局面。表示中の局面ならそのまま、そうでなければ（対局の枠が
+   * 指したあとの読みや、過去の局面の読みを描き直すとき）position 行から作る。
+   */
+  function gameForPv(t: Target): Game {
+    const v = lastView ?? currentView();
+    if (v.positionCmd === t.positionCmd && v.phase === t.phase) return viewGame();
+    const w = t.positionCmd.trim().split(/\s+/);
+    const mi = w.indexOf('moves');
+    const moves = mi < 0 ? [] : w.slice(mi + 1);
+    let g: Game;
+    if (w[1] === 'sfen') {
+      g = new Game(fuseki, 'position', w.slice(2, mi < 0 ? undefined : mi).join(' '));
+      for (const m of moves) g.apply(m);
+    } else {
+      g = rebuild(fuseki, 'fuseki', moves);
+    }
+    game.resync();
     return g;
   }
 
@@ -193,26 +297,11 @@ async function main(): Promise<void> {
     }
   }
 
-  /** エンジンが考えている間、名札の下に読みを出す */
-  function paintThinking(color: Color, info: UsiInfo | null): void {
-    const el = $('thinking');
-    if (!info) {
-      el.hidden = true;
-      el.textContent = '';
-      return;
-    }
-    const parts: string[] = [colorName(color) + 'が思考中'];
-    if (info.depth !== undefined) parts.push(`深さ ${info.depth}`);
-    if (info.scoreCp !== undefined) parts.push(`評価 ${info.scoreCp > 0 ? '+' : ''}${info.scoreCp}`);
-    if (info.scoreMate !== undefined) parts.push(`${info.scoreMate > 0 ? '' : '-'}${Math.abs(info.scoreMate)}手詰`);
-    if (info.pv?.length) parts.push(viewGame().japanesePv(info.pv).slice(0, 6).join(' '));
-    el.hidden = false;
-    el.textContent = parts.join(' · ');
-  }
-
   function startGame(mode: Mode, m: Partial<Meta> = {}, startSfen?: string): void {
     void analysis.stop();
     void driver.abort();
+    void kifuAnalyzer.stop();
+    analysis.clearPlayers();
     game = new Game(fuseki, mode, startSfen);
     meta = { sente: m.sente ?? '', gote: m.gote ?? '', timeControl: m.timeControl ?? null, startedAt: new Date() };
     attachClock(new Clock(meta.timeControl));
@@ -221,7 +310,6 @@ async function main(): Promise<void> {
     evals.clear();
     shapes = [];
     board.clearSelection();
-    paintThinking('sente', null);
     paintAll();
   }
 
@@ -241,11 +329,15 @@ async function main(): Promise<void> {
     const times = game.times().slice(0, cursor);
     game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times });
     cursor = null;
-    for (const k of [...evals.keys()]) if (k > game.nextPly - 1) evals.delete(k);
+    dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
     if (clock.enabled) clock.start(game.turn);
     paintAll();
     driver.interrupt();
+  }
+
+  function dropEvalsAfter(ply: number): void {
+    for (const [k, e] of [...evals]) if (e.ply > ply) evals.delete(k);
   }
 
   function undo(): void {
@@ -254,7 +346,7 @@ async function main(): Promise<void> {
     const tokens = game.tokens().slice(0, -1);
     const times = game.times().slice(0, -1);
     game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times });
-    for (const k of [...evals.keys()]) if (k > game.nextPly - 1) evals.delete(k);
+    dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
     if (clock.enabled) clock.start(game.turn);
     paintAll();
@@ -291,8 +383,8 @@ async function main(): Promise<void> {
 
   function paintGraph(current: number | null): void {
     const v = lastView ?? currentView();
-    const cur = current ?? evals.get(v.ply)?.p ?? null;
-    graph.render({ points: [...evals.values()], ply: v.ply, current: cur });
+    const cur = current ?? evalAt(v.ply);
+    graph.render({ points: [...evals.values()], ply: v.ply, current: cur, fusekiEnd: game.mode === 'position' ? 0 : 40 });
   }
 
   function names(): Partial<Record<Color, string>> {
@@ -347,7 +439,7 @@ async function main(): Promise<void> {
     paintSide(v);
     paintGraph(null);
     say(cursor === null ? phaseText(v) : `${phaseText(v)} · 過去の局面（→ か End で最新へ）`);
-    void analysis.setTarget({ positionCmd: v.positionCmd, phase: v.phase, turn: v.turn, ply: v.ply });
+    void analysis.setTarget(targetOf(v));
   }
 
   function paintSide(v: ViewState): void {
@@ -367,6 +459,14 @@ async function main(): Promise<void> {
         if (confirm(`${v.ply}手目以降の ${game.moves.length - cursor!} 手を消して、ここから指し直しますか`)) branchHere();
       });
       p.appendChild(b);
+      el.appendChild(p);
+      return;
+    }
+    if (v.phase === 'over' && v.over) {
+      const p = document.createElement('div');
+      p.className = 'result';
+      const w = v.over.winner === null ? '引き分け' : `${colorMark(v.over.winner)} ${names()[v.over.winner] || colorName(v.over.winner)}の勝ち`;
+      p.innerHTML = `<strong>終局</strong> ${escapeText(w)}（${escapeText(v.over.reason)}）<span class="result-hint">棋譜解析で振り返るか、局面を選んで検討できます</span>`;
       el.appendChild(p);
       return;
     }
@@ -468,6 +568,8 @@ async function main(): Promise<void> {
     const k = parseKif(text);
     void analysis.stop();
     void driver.abort();
+    void kifuAnalyzer.stop();
+    analysis.clearPlayers();
     if (editor) exitEditor();
     game = rebuild(fuseki, k.mode, k.tokens, { startSfen: k.startSfen, times: k.times });
     meta = { sente: k.sente ?? '', gote: k.gote ?? '', timeControl: k.timeControl, startedAt: new Date() };
@@ -576,6 +678,7 @@ async function main(): Promise<void> {
   window.addEventListener('beforeunload', () => {
     void analysis.shutdown();
     void driver.shutdown();
+    void kifuAnalyzer.shutdown();
   });
 
   // 動作確認のスクリプト（scripts/*.mjs）から使う入口。利用者の操作には使わない
@@ -591,6 +694,8 @@ async function main(): Promise<void> {
     game: () => game,
     builtin: () => builtin,
     analysis,
+    kifuAnalysis: (o: { fromIndex: number; secPerMove: number }) => kifuAnalyzer.run(o),
+    evals: () => [...evals.values()],
     settings,
     probe: (cfg: { path: string; args?: string; cwd?: string }) => UsiEngine.probe(cfg, (dir, text) => usiConsole.append(dir, text)),
     save: () => saveSettings(settings),
@@ -603,6 +708,10 @@ async function main(): Promise<void> {
   if (!isTauri()) {
     usiConsole.append('sys', 'ブラウザのプレビューです。盤と棋譜は動きますが、エンジンや棋譜のファイルは Tauri のアプリ内でだけ扱えます。');
   }
+}
+
+function escapeText(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function applyTheme(theme: Settings['theme']): void {

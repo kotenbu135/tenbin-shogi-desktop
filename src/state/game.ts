@@ -407,6 +407,11 @@ export class Game {
     return v;
   }
 
+  /** wasm の局面を自分の棋譜どおりに戻す。別の Game を作った（rebuild した）あとに呼ぶ */
+  resync(): void {
+    this.resyncWasm();
+  }
+
   /** wasm の局面を自分の棋譜どおりに戻す（viewAt の後始末）。 */
   private resyncWasm(): void {
     this.fuseki.reset();

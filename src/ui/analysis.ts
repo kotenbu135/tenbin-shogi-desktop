@@ -1,19 +1,26 @@
-// 検討パネル。枠（slot）ごとにエンジンを 1 本持ち、同じ局面を同時に考えさせて候補を並べる。
-// 枠の「自動」は局面で切り替える: 布石中は内蔵の評価か布石対応のエンジン、41 手目からは本将棋の既定エンジン。
-// 評価はここで「先手の勝率」に直してから外へ渡す（グラフと同じ目盛り）。cp はそのエンジンの目盛りのまま添える。
+// 検討パネル。エンジンの読みを出す場所はここ 1 つ（ShogiHome の「思考／読み筋」タブと同じ考え方）。
+//
+//   対局の枠  対局中に手番のエンジンが読んでいる筋。席ごとに 1 つ。操作は無く、指したら止まる
+//   検討の枠  利用者が足したエンジンで同じ局面を並べて検討する。「自動」は局面で切り替える:
+//             布石中は内蔵の評価か布石対応のエンジン、41 手目からは本将棋の既定エンジン
+//
+// 評価はここで「先手の勝率」に直してから外へ渡す（グラフと同じ目盛り）。cp もこの表では先手から見た値に
+// そろえる（勝率の列と符号が食い違わないように）。そのエンジンの目盛りのまま添える。
 
 import type { EngineConfig, EngineState, Thinker } from '../usi/engine.ts';
 import { cpToP, pToCp } from '../usi/evalscale.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import type { Color, Phase } from '../state/game.ts';
 import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
+import type { EvalSource } from './graph.ts';
 
 export interface AnalysisLine {
   multipv: number;
   /** 先手の勝率 */
   pSente: number;
-  /** 手番側 cp（そのエンジンの目盛り。内蔵は擬似 cp） */
+  /** 先手から見た cp（そのエンジンの目盛り。内蔵は擬似 cp） */
   cp: number | null;
+  /** 先手から見た詰み手数（正なら先手の勝ち） */
   mate: number | null;
   depth: number | null;
   seldepth: number | null;
@@ -26,21 +33,47 @@ export interface AnalysisLine {
 export interface AnalysisDeps {
   settings(): Settings;
   save(): Promise<void>;
-  /** 主の枠の評価。ply: 評価した局面の手数（その局面までに指された手数） */
-  onEvaluation(ply: number, pSente: number, lines: AnalysisLine[]): void;
+  /** 評価が来た。ply: 評価した局面の手数（その局面までに指された手数）。source: 対局の枠か検討の枠か */
+  onEvaluation(ply: number, pSente: number, lines: AnalysisLine[], source: EvalSource): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
   openEngineSettings(): void;
-  /** 読み筋（USI）を符号の列にする */
-  pvText(usis: string[]): string[];
+  /** 「棋譜解析」を押した */
+  onKifuAnalysis(): void;
+  /** 読み筋（USI）を、その局面を起点に符号の列にする */
+  pvText(usis: string[], t: Target): string[];
   /** id（'builtin' か登録 id）から思考するものを作る。無ければ null */
   createThinker(id: string, processTag: string): Thinker | null;
 }
 
+/** 検討する局面。stage は「終局」を含まない段階（終局した局面も、その段階のルールで検討できる） */
 export interface Target {
   positionCmd: string;
   phase: Phase;
+  stage: 'kings' | 'choose' | 'fuseki' | 'normal';
   turn: Color;
   ply: number;
+}
+
+/** info 1 行を先手の勝率と先手から見た cp・詰みに直す。評価の無い行（string だけなど）は null */
+export function evalOfInfo(info: UsiInfo, eval_: EngineConfig['eval'], turn: Color): { pSente: number; cp: number | null; mate: number | null } | null {
+  if (info.string !== undefined && info.scoreCp === undefined && info.winrate === undefined && info.scoreMate === undefined) return null;
+  let pStm: number;
+  let cp: number | null = null;
+  let mate: number | null = null;
+  if (info.scoreMate !== undefined) {
+    mate = info.scoreMate;
+    pStm = info.scoreMate > 0 ? 1 : 0;
+  } else if (info.winrate !== undefined) {
+    pStm = info.winrate;
+    cp = info.scoreCp ?? pToCp(pStm, eval_);
+  } else if (info.scoreCp !== undefined) {
+    cp = info.scoreCp;
+    pStm = cpToP(cp, eval_);
+  } else {
+    return null;
+  }
+  const sente = turn === 'sente';
+  return { pSente: sente ? pStm : 1 - pStm, cp: cp === null ? null : sente ? cp : -cp, mate: mate === null ? null : sente ? mate : -mate };
 }
 
 const AUTO = 'auto';
@@ -53,8 +86,11 @@ class Slot {
   private pool = new Map<string, Thinker>();
   lines = new Map<number, AnalysisLine>();
   running = false;
+  /** 対局の枠だけ: 読んでいるエンジンと局面 */
+  playerCfg: EngineConfig | null = null;
+  playerTarget: Target | null = null;
   readonly root: HTMLElement;
-  readonly select: HTMLSelectElement;
+  readonly select: HTMLSelectElement | null;
   readonly name: HTMLElement;
   readonly stats: HTMLElement;
   readonly notice: HTMLElement;
@@ -62,24 +98,28 @@ class Slot {
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTarget: Target | null = null;
 
-  constructor(readonly index: number, private readonly panel: AnalysisPanel) {
+  constructor(readonly index: number, private readonly panel: AnalysisPanel, readonly player = false) {
     this.root = document.createElement('section');
-    this.root.className = 'analysis-slot';
-    this.root.innerHTML = `
-      <div class="aslot-head">
+    this.root.className = 'analysis-slot' + (player ? ' player' : '');
+    this.root.innerHTML = player
+      ? `<div class="aslot-head"><span class="player-label"></span></div>
+      <div class="analysis-status"><span class="engine-name"></span><span class="engine-stats"></span></div>
+      <div class="analysis-notice" hidden></div>
+      <div class="analysis-table"></div>`
+      : `<div class="aslot-head">
         <select class="engine-select" aria-label="この枠のエンジン"></select>
         <button type="button" class="link aslot-remove" title="この枠を外す" aria-label="この枠を外す">×</button>
       </div>
       <div class="analysis-status"><span class="engine-name"></span><span class="engine-stats"></span></div>
       <div class="analysis-notice" hidden></div>
       <div class="analysis-table"></div>`;
-    this.select = this.root.querySelector('.engine-select')!;
+    this.select = this.root.querySelector('.engine-select');
     this.name = this.root.querySelector('.engine-name')!;
     this.stats = this.root.querySelector('.engine-stats')!;
     this.notice = this.root.querySelector('.analysis-notice')!;
     this.table = this.root.querySelector('.analysis-table')!;
-    this.select.addEventListener('change', () => void this.panel.slotChanged(this, this.select.value));
-    this.root.querySelector('.aslot-remove')!.addEventListener('click', () => void this.panel.removeSlot(this));
+    this.select?.addEventListener('change', () => void this.panel.slotChanged(this, this.select!.value));
+    this.root.querySelector('.aslot-remove')?.addEventListener('click', () => void this.panel.removeSlot(this));
     this.paintTable(null);
   }
 
@@ -87,13 +127,8 @@ class Slot {
   resolve(s: Settings, t: Target | null): string | null {
     if (this.engineId !== AUTO) return this.engineId;
     if (!t) return null;
-    if (t.phase === 'normal' || t.phase === 'over') return normalEngine(s)?.id ?? null;
+    if (t.stage === 'normal') return normalEngine(s)?.id ?? null;
     return s.fusekiEngineId;
-  }
-
-  configOf(s: Settings, id: string): EngineConfig | null {
-    if (id === BUILTIN_ID) return this.thinker?.config.id === BUILTIN_ID ? this.thinker.config : this.pool.get(BUILTIN_ID)?.config ?? null;
-    return s.engines.find((e) => e.id === id) ?? null;
   }
 
   async use(id: string, deps: AnalysisDeps): Promise<Thinker> {
@@ -128,7 +163,17 @@ class Slot {
     this.notice.textContent = text ?? '';
   }
 
+  /** 対局の枠の見出し（「☗ 先手 · 水匠5」）と状態 */
+  setPlayer(label: string, state: string, cfg: EngineConfig | null): void {
+    const el = this.root.querySelector('.player-label');
+    if (el) el.textContent = label;
+    this.name.textContent = cfg ? `${cfg.name || cfg.idName || cfg.path} · ${state}` : state;
+    this.name.title = cfg?.idName ?? '';
+    if (!this.running) this.stats.textContent = '';
+  }
+
   paintState(): void {
+    if (this.player) return;
     const st: EngineState = this.thinker?.state ?? 'stopped';
     // 登録名を出す。id name は長い（版や CPU の種別が付く）ので title に回す
     const name = this.thinker?.config.name || this.thinker?.idName || '';
@@ -139,29 +184,14 @@ class Slot {
   }
 
   onInfo(info: UsiInfo, t: Target, cfg: EngineConfig, deps: AnalysisDeps, primary: boolean): void {
-    if (info.string !== undefined && info.scoreCp === undefined && info.winrate === undefined) return;
-    let pStm: number;
-    let cp: number | null = null;
-    let mate: number | null = null;
-    if (info.scoreMate !== undefined) {
-      mate = info.scoreMate;
-      pStm = info.scoreMate > 0 ? 1 : 0;
-    } else if (info.winrate !== undefined) {
-      pStm = info.winrate;
-      cp = info.scoreCp ?? pToCp(pStm, cfg.eval);
-    } else if (info.scoreCp !== undefined) {
-      cp = info.scoreCp;
-      pStm = cpToP(cp, cfg.eval);
-    } else {
-      return;
-    }
-    const pSente = t.turn === 'sente' ? pStm : 1 - pStm;
+    const ev = evalOfInfo(info, cfg.eval, t.turn);
+    if (!ev) return;
     const mpv = info.multipv ?? 1;
     this.lines.set(mpv, {
       multipv: mpv,
-      pSente,
-      cp,
-      mate,
+      pSente: ev.pSente,
+      cp: ev.cp,
+      mate: ev.mate,
       depth: info.depth ?? null,
       seldepth: info.seldepth ?? null,
       nodes: info.nodes ?? null,
@@ -169,7 +199,7 @@ class Slot {
       time: info.time ?? null,
       pv: info.pv ?? [],
     });
-    if (primary && mpv === 1) deps.onEvaluation(t.ply, pSente, this.sortedLines());
+    if (primary && mpv === 1) deps.onEvaluation(t.ply, ev.pSente, this.sortedLines(), this.player ? 'play' : 'analysis');
     // info は秒に数十回来る。描画は間引く。描く局面は最後に受けたもの（間引きの窓の中で局面が変わりうる）
     this.lastTarget = t;
     if (!this.renderTimer) {
@@ -187,11 +217,11 @@ class Slot {
   paintTable(t: Target | null): void {
     const lines = this.sortedLines();
     const top = lines[0];
-    if (top && t && t.phase !== 'normal' && t.phase !== 'over') {
+    if (top && t && t.stage !== 'normal') {
       // 布石中の数字は価値ネットの推定。深さやノード数に意味は無いので、代わりに当てにできる度合いを出す。
       // held-out の AUC は 1〜17 手目で 0.62〜0.65、18 手目から 0.69、30 手目以降で 0.76〜0.78（iter1400 以降）。
       const trust = t.ply < 18 ? '序盤の数字は当てにならない' : t.ply < 30 ? '中盤の数字は目安' : '終盤の数字はおおむね当たる';
-      this.stats.textContent = t.phase === 'kings' ? '両玉の価値表 · 実対局の勝率' : `布石の価値ネット · ${trust}`;
+      this.stats.textContent = t.stage === 'kings' ? '両玉の価値表 · 実対局の勝率' : `布石の価値ネット · ${trust}`;
     } else if (top) {
       const parts: string[] = [];
       if (top.depth !== null) parts.push(`深さ ${top.depth}${top.seldepth !== null ? '/' + top.seldepth : ''}`);
@@ -203,7 +233,9 @@ class Slot {
     if (!t || lines.length === 0) {
       this.table.innerHTML = this.running
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
-        : '<div class="analysis-empty">検討を始めると、候補手と勝率がここに並びます。</div>';
+        : this.player
+          ? '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
+          : '<div class="analysis-empty">検討を始めると、候補手と勝率がここに並びます。</div>';
       return;
     }
     // 候補ごとに2行。1行目に順位・候補手・先手勝率・評価値、2行目に読み筋。
@@ -212,7 +244,7 @@ class Slot {
     for (const l of lines) {
       const li = document.createElement('li');
       li.className = 'cand';
-      const pv = this.panel.pvText(l.pv);
+      const pv = this.panel.pvText(l.pv, t);
       const move = pv[0] ?? '—';
       const evalText = l.mate !== null
         ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
@@ -223,7 +255,7 @@ class Slot {
           <span class="rank">${l.multipv}</span>
           <span class="move">${escapeHtml(move)}</span>
           <span class="p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></span>
-          <span class="cp" title="手番側の評価値（このエンジンの目盛り）">${escapeHtml(evalText)}</span>
+          <span class="cp" title="先手から見た評価値（このエンジンの目盛り）">${escapeHtml(evalText)}</span>
         </div>
         <div class="pv">${escapeHtml(pv.slice(1, 16).join(' '))}</div>`;
       list.appendChild(li);
@@ -234,34 +266,46 @@ class Slot {
 
 export class AnalysisPanel {
   private slots: Slot[] = [];
+  private players = new Map<0 | 1, Slot>();
   private target: Target | null = null;
   private running = false;
   private readonly toggle: HTMLButtonElement;
   private readonly addBtn: HTMLButtonElement;
+  private readonly kifuBtn: HTMLButtonElement;
   private readonly multipv: HTMLInputElement;
   private readonly slotsEl: HTMLElement;
+  private readonly playersEl: HTMLElement;
   private readonly notice: HTMLElement;
+  private readonly progress: HTMLElement;
 
   constructor(private readonly root: HTMLElement, private readonly deps: AnalysisDeps) {
     root.innerHTML = `
       <div class="analysis-head">
         <span class="analysis-title">検討</span>
-        <label class="multipv" title="候補の数（MultiPV）"><span>候補</span><input type="number" min="1" max="20" value="${deps.settings().analysisMultiPv}" /></label>
-        <button type="button" class="link" data-act="add" title="もう 1 本のエンジンで同じ局面を検討する">＋ エンジンを足す</button>
         <button type="button" class="primary" data-act="toggle">検討を始める</button>
       </div>
+      <div class="analysis-tools">
+        <label class="multipv" title="候補の数（MultiPV）"><span>候補</span><input type="number" min="1" max="20" value="${deps.settings().analysisMultiPv}" /></label>
+        <button type="button" class="link" data-act="add" title="もう 1 本のエンジンで同じ局面を検討する">＋ エンジンを足す</button>
+        <button type="button" class="link" data-act="kifu" title="棋譜の各局面を順に評価してグラフに入れる">棋譜解析</button>
+      </div>
       <div class="analysis-notice panel-notice" hidden></div>
-      <div class="slots"></div>`;
+      <div class="analysis-progress" hidden></div>
+      <div class="slots"><div class="player-slots"></div><div class="user-slots"></div></div>`;
     this.toggle = root.querySelector('[data-act="toggle"]')!;
     this.addBtn = root.querySelector('[data-act="add"]')!;
+    this.kifuBtn = root.querySelector('[data-act="kifu"]')!;
     this.multipv = root.querySelector('.multipv input')!;
-    this.slotsEl = root.querySelector('.slots')!;
+    this.slotsEl = root.querySelector('.user-slots')!;
+    this.playersEl = root.querySelector('.player-slots')!;
     this.notice = root.querySelector('.panel-notice')!;
+    this.progress = root.querySelector('.analysis-progress')!;
     this.toggle.addEventListener('click', () => {
       if (this.running) void this.stop();
       else void this.start();
     });
     this.addBtn.addEventListener('click', () => void this.addSlot(AUTO));
+    this.kifuBtn.addEventListener('click', () => this.deps.onKifuAnalysis());
     this.multipv.addEventListener('change', () => {
       const n = Math.min(20, Math.max(1, Math.floor(Number(this.multipv.value) || 1)));
       this.multipv.value = String(n);
@@ -279,9 +323,69 @@ export class AnalysisPanel {
     return this.running;
   }
 
-  pvText(usis: string[]): string[] {
-    return this.deps.pvText(usis);
+  pvText(usis: string[], t: Target): string[] {
+    return this.deps.pvText(usis, t);
   }
+
+  // ---- 対局の枠 ----
+
+  /** 手番のエンジンが考え始めた。席ごとに枠を 1 つ持ち、前の読みは消す */
+  beginPlayer(seat: 0 | 1, label: string, cfg: EngineConfig, t: Target): void {
+    let s = this.players.get(seat);
+    if (!s) {
+      s = new Slot(seat, this, true);
+      this.players.set(seat, s);
+      // 席の順に並べる
+      const other = this.players.get(seat === 0 ? 1 : 0);
+      if (seat === 0 && other) this.playersEl.insertBefore(s.root, other.root);
+      else this.playersEl.appendChild(s.root);
+    }
+    s.playerCfg = cfg;
+    s.playerTarget = t;
+    s.lines.clear();
+    s.running = true;
+    s.setPlayer(label, '思考中', cfg);
+    s.paintTable(t);
+  }
+
+  playerInfo(seat: 0 | 1, info: UsiInfo): void {
+    const s = this.players.get(seat);
+    if (!s || !s.running || !s.playerTarget || !s.playerCfg) return;
+    s.onInfo(info, s.playerTarget, s.playerCfg, this.deps, true);
+  }
+
+  /** 指した（または中断した）。読みは残す */
+  endPlayer(seat: 0 | 1, state = '指した'): void {
+    const s = this.players.get(seat);
+    if (!s) return;
+    s.running = false;
+    s.setPlayer(s.root.querySelector('.player-label')?.textContent ?? '', state, s.playerCfg);
+    s.paintTable(s.playerTarget);
+  }
+
+  /** 対局が変わった。対局の枠を全部消す */
+  clearPlayers(): void {
+    for (const s of this.players.values()) s.root.remove();
+    this.players.clear();
+  }
+
+  /** 棋譜解析の進み具合。null で消す */
+  setProgress(text: string | null, onStop?: () => void): void {
+    this.progress.hidden = !text;
+    this.progress.replaceChildren();
+    if (!text) return;
+    this.progress.append(text);
+    if (onStop) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'link';
+      b.textContent = '止める';
+      b.addEventListener('click', onStop);
+      this.progress.append(' ', b);
+    }
+  }
+
+  // ---- 検討の枠 ----
 
   private addSlot(id: string, persist = true): void {
     if (this.slots.length >= MAX_SLOTS) return;
@@ -331,35 +435,35 @@ export class AnalysisPanel {
       this.notice.append('布石は内蔵の評価で検討できます。41 手目以降には USI エンジンが要ります。', b);
     }
     for (const s of this.slots) {
+      const sel = s.select!;
       const cur = s.engineId;
-      s.select.replaceChildren();
+      sel.replaceChildren();
       const add = (value: string, text: string) => {
         const o = document.createElement('option');
         o.value = value;
         o.textContent = text;
-        s.select.appendChild(o);
+        sel.appendChild(o);
       };
       add(AUTO, '自動（布石は内蔵、41手目から既定のエンジン）');
       add(BUILTIN_ID, '内蔵の布石評価');
       for (const e of st.engines) add(e.id, e.name || e.path);
-      s.select.value = cur === AUTO || cur === BUILTIN_ID || st.engines.some((e) => e.id === cur) ? cur : AUTO;
-      s.engineId = s.select.value;
+      sel.value = cur === AUTO || cur === BUILTIN_ID || st.engines.some((e) => e.id === cur) ? cur : AUTO;
+      s.engineId = sel.value;
     }
     this.addBtn.disabled = this.slots.length >= MAX_SLOTS;
   }
 
   private canAnalyze(cfg: EngineConfig, t: Target): string | null {
-    if (t.phase === 'over') return '対局は終わっています。';
-    if (t.phase === 'choose') return '先手か後手かを選ぶと検討できます。';
-    if (t.phase !== 'normal' && cfg.kind !== 'fuseki') return '布石中はこのエンジンでは評価できません。布石対応のエンジンか内蔵の評価を選んでください。';
-    if (t.phase === 'normal' && cfg.id === BUILTIN_ID) return '内蔵の評価は布石だけです。41 手目からは本将棋のエンジンを使います。';
+    if (t.stage === 'choose') return '先手か後手かを選ぶと検討できます。';
+    if (t.stage !== 'normal' && cfg.kind !== 'fuseki') return '布石中はこのエンジンでは評価できません。布石対応のエンジンか内蔵の評価を選んでください。';
+    if (t.stage === 'normal' && cfg.id === BUILTIN_ID) return '内蔵の評価は布石だけです。41 手目からは本将棋のエンジンを使います。';
     return null;
   }
 
   /** 表示中の局面が変わったら呼ぶ。検討中なら新しい局面で続ける。 */
   async setTarget(t: Target): Promise<void> {
     // 先後の選択は position に出ないので、局面の文字列だけでは区別できない。段階も見る
-    const same = this.target?.positionCmd === t.positionCmd && this.target?.phase === t.phase;
+    const same = this.target?.positionCmd === t.positionCmd && this.target?.stage === t.stage;
     this.target = t;
     if (this.running && !same) await this.restartAll();
     else for (const s of this.slots) s.paintState();
@@ -384,7 +488,7 @@ export class AnalysisPanel {
     if (!id) {
       await s.thinker?.stop();
       s.running = false;
-      s.showNotice(t.phase === 'normal' ? '41 手目以降の既定エンジンがありません。エンジンを登録してください。' : '布石を検討するものがありません。');
+      s.showNotice(t.stage === 'normal' ? '41 手目以降の既定エンジンがありません。エンジンを登録してください。' : '布石を検討するものがありません。');
       s.paintState();
       return;
     }
