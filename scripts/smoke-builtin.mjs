@@ -28,7 +28,7 @@ console.log('内蔵:', await ev(() => { const b = window.tenbin.builtin(); retur
 // 2. 天秤将棋の 1 手目を内蔵で検討（両玉の価値表）
 await click('button[data-act="toggle"]');
 await page.waitForFunction(() => document.querySelectorAll('.analysis-slot .cand').length > 0, { timeout: 20000 });
-console.log('1手目の候補:', await ev(() => [...document.querySelectorAll('.analysis-slot .cand')].slice(0, 3).map((c) => c.querySelector('.move').textContent + ' ' + c.querySelector('.num').textContent).join(' | ')),
+console.log('1手目の候補:', await ev(() => [...document.querySelectorAll('.analysis-slot .cand')].slice(0, 3).map((c) => c.querySelector('.c-pv .move').textContent + ' ' + c.querySelector('.c-p .num').textContent).join(' | ')),
   '/ 出どころ:', await ev(() => document.querySelector('.analysis-slot .engine-stats').textContent));
 
 // 3. 両玉を置いて選び、布石 3 手目を内蔵で検討（価値ネット）
@@ -44,8 +44,12 @@ try {
   throw e;
 }
 const t0 = Date.now();
-console.log('3手目の候補:', await ev(() => [...document.querySelectorAll('.analysis-slot .cand')].slice(0, 3).map((c) => c.querySelector('.move').textContent + ' ' + c.querySelector('.num').textContent + ' ' + c.querySelector('.cp').textContent).join(' | ')));
-console.log('矢印/印:', await ev(() => document.querySelectorAll('svg.shapes .shape').length), '/ グラフ:', await ev(() => document.querySelector('#graph')?.textContent?.match(/\d+\.\d%/)?.[0]));
+console.log('3手目の候補:', await ev(() => [...document.querySelectorAll('.analysis-slot .cand')].slice(0, 3).map((c) => c.querySelector('.c-pv .move').textContent + ' ' + c.querySelector('.c-score').textContent + ' ' + c.querySelector('.c-p .num').textContent).join(' | ')));
+// グラフは下の欄のタブ。開いてから読む
+await ev(() => document.querySelector('.tab[data-tab="winrate"]').click());
+await new Promise((r) => setTimeout(r, 150));
+console.log('矢印/印:', await ev(() => document.querySelectorAll('svg.shapes .shape').length), '/ グラフ:', await ev(() => document.querySelector('#graph')?.textContent?.match(/\d+\.\d%/)?.[0]), '/ 点:', await ev(() => document.querySelectorAll('#graph .pt').length));
+await ev(() => document.querySelector('.tab[data-tab="analysis"]').click());
 await page.screenshot({ path: `${OUT}/builtin-analysis.png` });
 
 // 4. 枠を足して内蔵を 2 本目に（同じ局面で 2 枠）

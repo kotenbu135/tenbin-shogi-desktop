@@ -59,7 +59,7 @@ await evAsync(`window.tenbin.play({ mode: 'tenbin', seats: [
 const t0 = Date.now();
 let n = 0;
 for (let t = 0; t < 180; t++) { await sleep(1000); n = await ev('window.tenbin.game().moves.length'); if (n >= 47 || (await ev('window.tenbin.game().phase')) === 'over') break; }
-console.log('対局:', await status(), '| 手数', n, '|', ((Date.now() - t0) / 1000).toFixed(1), '秒 | 思考表示:', await ev('[...document.querySelectorAll(".analysis-slot.player")].map((s) => s.querySelector(".player-label").textContent + " / " + s.querySelector(".engine-name").textContent + " / " + s.querySelectorAll(".cand").length + "候補 / " + (s.querySelector(".cand .pv")?.textContent || "").slice(0, 40)).join(" || ")'), '| 対局の点:', await ev('window.tenbin.evals().filter((e) => e.source === "play").length'));
+console.log('対局:', await status(), '| 手数', n, '|', ((Date.now() - t0) / 1000).toFixed(1), '秒 | 思考表示:', await ev('[...document.querySelectorAll(".analysis-slot.player")].map((s) => s.querySelector(".player-label").textContent + " / " + s.querySelector(".engine-name").textContent + " / " + s.querySelectorAll(".cand").length + "候補 / " + (s.querySelector(".cand .c-pv")?.textContent || "").slice(0, 40)).join(" || ")'), '| 対局の点:', await ev('window.tenbin.evals().filter((e) => e.source === "sente" || e.source === "gote").length'));
 console.log('棋譜の末尾:', await ev('[...document.querySelectorAll(".kifu-move")].slice(-4).map(e=>e.textContent.replace(/\\s+/g," ").trim()).join(" / ")'));
 await shot(`${OUT}/play-engine.png`);
 }
@@ -81,13 +81,13 @@ await ev('window.tenbin.load(window.tenbin.kif()); 0');   // 表示を作り直�
 console.log('局面:', await status());
 console.log(await step('[data-act="toggle"]'));
 for (let t = 0; t < 60; t++) { await sleep(500); if ((await ev('document.querySelectorAll(".analysis-slot .cand").length')) >= 3) break; }
-console.log('枠1:', await ev('(()=>{const s=document.querySelector(".analysis-slot"); return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | " + [...s.querySelectorAll(".cand")].slice(0,3).map(c=>c.querySelector(".move").textContent+" "+c.querySelector(".num").textContent+" "+c.querySelector(".cp").textContent).join(" / ")})()'));
+console.log('枠1:', await ev('(()=>{const s=document.querySelector(".analysis-slot"); return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | " + [...s.querySelectorAll(".cand")].slice(0,3).map(c=>c.querySelector(".c-pv .move").textContent+" "+c.querySelector(".c-score").textContent+" "+c.querySelector(".c-p .num").textContent).join(" / ")})()'));
 const other = await ev('(window.tenbin.settings.engines.find(e => e.kind === "normal" && e.id !== ' + JSON.stringify(reg.id) + ') || {}).id || ""');
 if (other) {
   console.log(await step('[data-act="add"]'));
   await ev(`(()=>{const s=document.querySelectorAll(".analysis-slot select")[1]; s.value=${JSON.stringify(other)}; s.dispatchEvent(new Event("change")); return 1})()`);
   for (let t = 0; t < 60; t++) { await sleep(500); if ((await ev('document.querySelectorAll(".analysis-slot")[1]?.querySelectorAll(".cand").length')) >= 3) break; }
-  console.log('枠2:', await ev('(()=>{const s=document.querySelectorAll(".analysis-slot")[1]; return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | notice=" + s.querySelector(".analysis-notice").textContent + " | " + [...s.querySelectorAll(".cand")].slice(0,3).map(c=>c.querySelector(".move").textContent+" "+c.querySelector(".num").textContent+" "+c.querySelector(".cp").textContent).join(" / ")})()'));
+  console.log('枠2:', await ev('(()=>{const s=document.querySelectorAll(".analysis-slot")[1]; return s.querySelector(".engine-name").textContent + " | " + s.querySelector(".engine-stats").textContent + " | notice=" + s.querySelector(".analysis-notice").textContent + " | " + [...s.querySelectorAll(".cand")].slice(0,3).map(c=>c.querySelector(".c-pv .move").textContent+" "+c.querySelector(".c-score").textContent+" "+c.querySelector(".c-p .num").textContent).join(" / ")})()'));
 }
 await sleep(1500);
 await shot(`${OUT}/analysis-two-engines.png`);

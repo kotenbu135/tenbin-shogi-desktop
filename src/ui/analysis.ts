@@ -12,14 +12,16 @@ import { cpToP, pToCp } from '../usi/evalscale.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import type { Color, Phase } from '../state/game.ts';
 import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
-import type { EvalSource } from './graph.ts';
+import { MAX_SCORE, type EvalSource } from './graph.ts';
 
 export interface AnalysisLine {
   multipv: number;
   /** 先手の勝率 */
   pSente: number;
-  /** 先手から見た cp（そのエンジンの目盛り。内蔵は擬似 cp） */
+  /** 先手から見た cp（そのエンジンの目盛り） */
   cp: number | null;
+  /** cp が勝率からの換算（内蔵の布石評価など）なら true */
+  approx: boolean;
   /** 先手から見た詰み手数（正なら先手の勝ち） */
   mate: number | null;
   depth: number | null;
@@ -33,8 +35,8 @@ export interface AnalysisLine {
 export interface AnalysisDeps {
   settings(): Settings;
   save(): Promise<void>;
-  /** 評価が来た。ply: 評価した局面の手数（その局面までに指された手数）。source: 対局の枠か検討の枠か */
-  onEvaluation(ply: number, pSente: number, lines: AnalysisLine[], source: EvalSource): void;
+  /** 評価が来た。ply: 評価した局面の手数（その局面までに指された手数）。source: 先手・後手（対局中）か検討 */
+  onEvaluation(ply: number, ev: { p: number; cp: number | null; approx: boolean }, lines: AnalysisLine[], source: EvalSource): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
   openEngineSettings(): void;
   /** 「棋譜解析」を押した */
@@ -55,17 +57,23 @@ export interface Target {
 }
 
 /** info 1 行を先手の勝率と先手から見た cp・詰みに直す。評価の無い行（string だけなど）は null */
-export function evalOfInfo(info: UsiInfo, eval_: EngineConfig['eval'], turn: Color): { pSente: number; cp: number | null; mate: number | null } | null {
+export function evalOfInfo(info: UsiInfo, eval_: EngineConfig['eval'], turn: Color): { pSente: number; cp: number | null; mate: number | null; approx: boolean } | null {
   if (info.string !== undefined && info.scoreCp === undefined && info.winrate === undefined && info.scoreMate === undefined) return null;
   let pStm: number;
   let cp: number | null = null;
   let mate: number | null = null;
+  // cp を勝率から作ったか（そのエンジンが cp を出していないか）
+  let approx = false;
   if (info.scoreMate !== undefined) {
     mate = info.scoreMate;
     pStm = info.scoreMate > 0 ? 1 : 0;
   } else if (info.winrate !== undefined) {
     pStm = info.winrate;
-    cp = info.scoreCp ?? pToCp(pStm, eval_);
+    if (info.scoreCp !== undefined) cp = info.scoreCp;
+    else {
+      cp = pToCp(pStm, eval_);
+      approx = true;
+    }
   } else if (info.scoreCp !== undefined) {
     cp = info.scoreCp;
     pStm = cpToP(cp, eval_);
@@ -73,7 +81,12 @@ export function evalOfInfo(info: UsiInfo, eval_: EngineConfig['eval'], turn: Col
     return null;
   }
   const sente = turn === 'sente';
-  return { pSente: sente ? pStm : 1 - pStm, cp: cp === null ? null : sente ? cp : -cp, mate: mate === null ? null : sente ? mate : -mate };
+  return {
+    pSente: sente ? pStm : 1 - pStm,
+    cp: cp === null ? null : sente ? cp : -cp,
+    mate: mate === null ? null : sente ? mate : -mate,
+    approx,
+  };
 }
 
 const AUTO = 'auto';
@@ -85,6 +98,7 @@ class Slot {
   /** 一度立てたものは持っておく（40↔41 手目で行き来しても再起動しない） */
   private pool = new Map<string, Thinker>();
   lines = new Map<number, AnalysisLine>();
+  hashfull: number | null = null;
   running = false;
   /** 対局の枠だけ: 読んでいるエンジンと局面 */
   playerCfg: EngineConfig | null = null;
@@ -191,6 +205,7 @@ class Slot {
       multipv: mpv,
       pSente: ev.pSente,
       cp: ev.cp,
+      approx: ev.approx,
       mate: ev.mate,
       depth: info.depth ?? null,
       seldepth: info.seldepth ?? null,
@@ -199,7 +214,13 @@ class Slot {
       time: info.time ?? null,
       pv: info.pv ?? [],
     });
-    if (primary && mpv === 1) deps.onEvaluation(t.ply, ev.pSente, this.sortedLines(), this.player ? 'play' : 'analysis');
+    if (info.hashfull !== undefined) this.hashfull = info.hashfull;
+    if (primary && mpv === 1) {
+      // 詰みはグラフの端に置く。系列は対局中なら手番の側、検討なら検討
+      const cp = ev.mate !== null ? (ev.mate > 0 ? MAX_SCORE : -MAX_SCORE) : ev.cp;
+      const source: EvalSource = this.player ? (t.turn === 'sente' ? 'sente' : 'gote') : 'analysis';
+      deps.onEvaluation(t.ply, { p: ev.pSente, cp, approx: ev.approx }, this.sortedLines(), source);
+    }
     // info は秒に数十回来る。描画は間引く。描く局面は最後に受けたもの（間引きの窓の中で局面が変わりうる）
     this.lastTarget = t;
     if (!this.renderTimer) {
@@ -223,10 +244,11 @@ class Slot {
       const trust = t.ply < 18 ? '序盤の数字は当てにならない' : t.ply < 30 ? '中盤の数字は目安' : '終盤の数字はおおむね当たる';
       this.stats.textContent = t.stage === 'kings' ? '両玉の価値表 · 実対局の勝率' : `布石の価値ネット · ${trust}`;
     } else if (top) {
+      // ShogiHome の見出しと同じ並び: ノード数 · NPS · Hash 使用率 · 経過時間
       const parts: string[] = [];
-      if (top.depth !== null) parts.push(`深さ ${top.depth}${top.seldepth !== null ? '/' + top.seldepth : ''}`);
       if (top.nodes !== null) parts.push(`${top.nodes.toLocaleString('ja-JP')} ノード`);
       if (top.nps !== null) parts.push(`${top.nps.toLocaleString('ja-JP')} NPS`);
+      if (this.hashfull !== null) parts.push(`Hash ${(this.hashfull / 10).toFixed(1)}%`);
       if (top.time !== null) parts.push(`${(top.time / 1000).toFixed(1)} 秒`);
       this.stats.textContent = parts.join(' · ');
     }
@@ -235,32 +257,45 @@ class Slot {
         ? '<div class="analysis-empty">読み筋を待っています…</div>'
         : this.player
           ? '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
-          : '<div class="analysis-empty">検討を始めると、候補手と勝率がここに並びます。</div>';
+          : '<div class="analysis-empty">検討を始めると、候補手・評価値・期待勝率がここに並びます。</div>';
       return;
     }
-    // 候補ごとに2行。1行目に順位・候補手・先手勝率・評価値、2行目に読み筋。
-    const list = document.createElement('ol');
-    list.className = 'cand-list';
+    // 列は ShogiHome と同じ 順位 / 深さ / Node数 / 評価値 に、期待勝率 を足して 読み筋。
+    // 評価値と期待勝率は**どちらも先手から見た値**（符号と % の向きが食い違わないように）。
+    const table = document.createElement('table');
+    table.className = 'cand-table';
+    table.innerHTML =
+      '<thead><tr><th class="c-rank">順位</th><th class="c-depth">深さ</th><th class="c-nodes">Node数</th>' +
+      '<th class="c-score">評価値</th><th class="c-p">期待勝率</th><th class="c-pv">読み筋</th></tr></thead>';
+    const body = document.createElement('tbody');
+    // 布石中の深さ・ノード数は価値ネットの内部の数字で、読みの深さではない。出さない
+    const fuseki = t.stage !== 'normal';
     for (const l of lines) {
-      const li = document.createElement('li');
-      li.className = 'cand';
       const pv = this.panel.pvText(l.pv, t);
       const move = pv[0] ?? '—';
-      const evalText = l.mate !== null
-        ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
-        : l.cp !== null ? (l.cp > 0 ? `+${l.cp}` : String(l.cp)) : '';
+      const scoreText =
+        l.mate !== null
+          ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
+          : l.cp !== null
+            ? `${l.approx ? '≈' : ''}${l.cp > 0 ? '+' : ''}${l.cp}`
+            : '—';
+      const depth = fuseki || l.depth === null ? '—' : `${l.depth}${l.seldepth !== null ? '/' + l.seldepth : ''}`;
+      const nodes = fuseki || l.nodes === null ? '—' : l.nodes.toLocaleString('ja-JP');
       const pct = (l.pSente * 100).toFixed(1);
-      li.innerHTML = `
-        <div class="cand-head">
-          <span class="rank">${l.multipv}</span>
-          <span class="move">${escapeHtml(move)}</span>
-          <span class="p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></span>
-          <span class="cp" title="先手から見た評価値（このエンジンの目盛り）">${escapeHtml(evalText)}</span>
-        </div>
-        <div class="pv">${escapeHtml(pv.slice(1, 16).join(' '))}</div>`;
-      list.appendChild(li);
+      const tr = document.createElement('tr');
+      tr.className = 'cand';
+      tr.innerHTML = `
+        <td class="c-rank">${l.multipv}</td>
+        <td class="c-depth">${escapeHtml(depth)}</td>
+        <td class="c-nodes">${escapeHtml(nodes)}</td>
+        <td class="c-score${l.approx ? ' approx' : ''}"${l.approx ? ' title="このエンジンは評価値を出さない。勝率から換算した目安"' : ''}>${escapeHtml(scoreText)}</td>
+        <td class="c-p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></td>
+        <td class="c-pv"><span class="move">${escapeHtml(move)}</span> <span class="rest">${escapeHtml(pv.slice(1, 24).join(' '))}</span></td>`;
+      tr.querySelector('.c-pv')!.setAttribute('title', pv.join(' '));
+      body.appendChild(tr);
     }
-    this.table.replaceChildren(list);
+    table.appendChild(body);
+    this.table.replaceChildren(table);
   }
 }
 
@@ -281,10 +316,7 @@ export class AnalysisPanel {
   constructor(private readonly root: HTMLElement, private readonly deps: AnalysisDeps) {
     root.innerHTML = `
       <div class="analysis-head">
-        <span class="analysis-title">検討</span>
         <button type="button" class="primary" data-act="toggle">検討を始める</button>
-      </div>
-      <div class="analysis-tools">
         <label class="multipv" title="候補の数（MultiPV）"><span>候補</span><input type="number" min="1" max="20" value="${deps.settings().analysisMultiPv}" /></label>
         <button type="button" class="link" data-act="add" title="もう 1 本のエンジンで同じ局面を検討する">＋ エンジンを足す</button>
         <button type="button" class="link" data-act="kifu" title="棋譜の各局面を順に評価してグラフに入れる">棋譜解析</button>
@@ -343,6 +375,7 @@ export class AnalysisPanel {
     s.playerCfg = cfg;
     s.playerTarget = t;
     s.lines.clear();
+    s.hashfull = null;
     s.running = true;
     s.setPlayer(label, '思考中', cfg);
     s.paintTable(t);
@@ -494,6 +527,7 @@ export class AnalysisPanel {
     }
     // 前のエンジンの候補を消してから次を立てる（起動を待つ間に古い候補が残らないように）
     s.lines.clear();
+    s.hashfull = null;
     s.paintTable(t);
     try {
       const th = await s.use(id, this.deps);
@@ -504,6 +538,8 @@ export class AnalysisPanel {
         s.running = false;
         s.showNotice(why);
         s.lines.clear();
+        s.hashfull = null;
+    s.hashfull = null;
         s.paintTable(t);
         s.paintState();
         return;
@@ -511,6 +547,7 @@ export class AnalysisPanel {
       s.showNotice(null);
       s.running = true;
       s.lines.clear();
+    s.hashfull = null;
       s.paintTable(t);
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', st.analysisMultiPv);
       const primary = this.slots[0] === s;

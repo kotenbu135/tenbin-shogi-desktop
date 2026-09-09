@@ -10,17 +10,27 @@
   <body>
     <div id="app" class="app">
       <header class="toolbar" id="toolbar"></header>
-      <main class="main">
-        <section class="stage">
-          <div class="board-area"><div id="board"></div></div>
-          <div class="graph" id="graph"></div>
-          <div class="editor" id="editor" hidden></div>
-        </section>
-        <aside class="side">
-          <div class="side-head" id="players"></div>
-          <div class="kifu" id="kifu"></div>
-          <div class="analysis" id="analysis"></div>
-        </aside>
+      <!-- 上に盤と棋譜、下にタブ（検討・評価値・期待勝率）。仕切りは掴んで動かせる（ShogiHome と同じ割りつけ） -->
+      <main class="main" id="main">
+        <div class="pane-top">
+          <div class="board-col">
+            <div class="board-area"><div id="board"></div></div>
+            <div class="editor" id="editor" hidden></div>
+          </div>
+          <div class="split split-v" id="split-v" role="separator" aria-orientation="vertical" aria-label="棋譜の欄の幅" tabindex="0"></div>
+          <aside class="record-pane">
+            <div class="side-head" id="players"></div>
+            <div class="kifu" id="kifu"></div>
+          </aside>
+        </div>
+        <div class="split split-h" id="split-h" role="separator" aria-orientation="horizontal" aria-label="下の欄の高さ" tabindex="0"></div>
+        <div class="pane-bottom">
+          <div class="tabbar" id="tabbar" role="tablist"></div>
+          <div class="tab-body">
+            <div class="analysis" id="analysis" role="tabpanel"></div>
+            <div class="graph" id="graph" role="tabpanel" hidden></div>
+          </div>
+        </div>
       </main>
       <footer class="status" id="status"></footer>
       <div class="console" id="console" hidden></div>

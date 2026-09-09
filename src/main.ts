@@ -8,6 +8,7 @@ import { Clock, type TimeControl } from './state/clock.ts';
 import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
+import { Layout, type TabId } from './ui/layout.ts';
 import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel, type Target } from './ui/analysis.ts';
 import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
@@ -84,23 +85,24 @@ async function main(): Promise<void> {
     return new UsiEngine(cfg, `${cfg.id}-${processTag}`);
   }
 
-  function setEval(ply: number, p: number, source: EvalSource): void {
-    evals.set(`${source}:${ply}`, { ply, p, source });
+  function setEval(ply: number, ev: { p: number; cp: number | null; approx: boolean }, source: EvalSource): void {
+    evals.set(`${source}:${ply}`, { ply, p: ev.p, cp: ev.cp, approx: ev.approx, source });
   }
 
-  /** 表示中の手数の評価。検討の値を優先し、無ければ対局中の値 */
-  function evalAt(ply: number): number | null {
-    return evals.get(`analysis:${ply}`)?.p ?? evals.get(`play:${ply}`)?.p ?? null;
+  /** 表示中の手数の評価。検討の値を優先し、無ければ対局中に指した側の値 */
+  function evalAt(ply: number): { p: number; cp: number | null; approx: boolean } | null {
+    const e = evals.get(`analysis:${ply}`) ?? evals.get(`sente:${ply}`) ?? evals.get(`gote:${ply}`) ?? null;
+    return e === null ? null : { p: e.p, cp: e.cp, approx: e.approx };
   }
 
   const analysis = new AnalysisPanel($('analysis'), {
     settings: () => settings,
     save: () => saveSettings(settings),
     createThinker,
-    onEvaluation: (ply, pSente, lines, source) => {
-      setEval(ply, pSente, source);
+    onEvaluation: (ply, ev, lines, source) => {
+      setEval(ply, ev, source);
       const v = lastView ?? currentView();
-      paintGraph(ply === v.ply ? pSente : null);
+      paintGraph(ply === v.ply ? { p: ev.p, cp: ev.cp, approx: ev.approx } : null);
       // 矢印は検討の候補だけ。対局中のエンジンの読みは盤に出さない（人が相手のとき、手を先に見せない）
       if (source !== 'analysis') return;
       shapes = [];
@@ -131,8 +133,8 @@ async function main(): Promise<void> {
       }
       return out;
     },
-    onPoint: (ply, p) => {
-      setEval(ply, p, 'analysis');
+    onPoint: (ply, ev) => {
+      setEval(ply, ev, 'analysis');
       paintGraph(null);
     },
     onProgress: (text) => analysis.setProgress(text, text ? () => void kifuAnalyzer.stop() : undefined),
@@ -182,6 +184,15 @@ async function main(): Promise<void> {
   });
 
   const graph = new TenbinGraph(graphEl);
+  const layout = new Layout($('main'), $('tabbar'), { analysis: $('analysis'), score: graphEl, winrate: graphEl }, {
+    layout: () => settings.layout,
+    save: () => void saveSettings(settings),
+    onTab: (id: TabId) => {
+      if (id !== 'analysis') graph.setType(id);
+      paintGraph(null);
+    },
+  });
+  layout.setTab(settings.layout.tab);
   graph.onSeek = (ply) => {
     if (editor) return;
     // その手数までの棋譜の位置へ。手数を持たない行（先後の選択）は飛ばす
@@ -381,7 +392,9 @@ async function main(): Promise<void> {
   // ---- 描画 ----
   let lastView: ViewState | null = null;
 
-  function paintGraph(current: number | null): void {
+  function paintGraph(current: { p: number; cp: number | null; approx: boolean } | null): void {
+    // タブが閉じているあいだは幅が 0。開いたときに描き直す
+    if (graphEl.hidden) return;
     const v = lastView ?? currentView();
     const cur = current ?? evalAt(v.ply);
     graph.render({ points: [...evals.values()], ply: v.ply, current: cur, fusekiEnd: game.mode === 'position' ? 0 : 40 });

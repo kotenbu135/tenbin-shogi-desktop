@@ -209,8 +209,8 @@ export class BuiltinEvaluator implements Thinker {
         onInfo({
           depth: r.method === 'twoply' ? 2 : 1,
           multipv: i + 1,
+          // cp は出さない。この評価は勝率そのもので、cp は受け手が目盛りで換算した目安として扱う
           winrate: c.p,
-          scoreCp: pToCp(c.p, BUILTIN_EVAL),
           nodes: r.candidates.length,
           time: ms,
           pv: [c.usi],

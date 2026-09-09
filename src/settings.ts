@@ -23,10 +23,32 @@ export interface Settings {
   builtinMethod: 'value' | 'twoply';
   /** 棋譜解析の 1 局面の秒数 */
   kifuAnalysisSec: number;
+  /** 画面の割りつけ（仕切りの位置と、下の欄で開いているタブ） */
+  layout: LayoutSettings;
 }
 
+export interface LayoutSettings {
+  /** 棋譜の欄の幅（px） */
+  recordWidth: number;
+  /** 下の欄の高さ（px） */
+  bottomHeight: number;
+  /** 下の欄で開いているタブ */
+  tab: 'analysis' | 'score' | 'winrate';
+}
+
+export const DEFAULT_LAYOUT: LayoutSettings = { recordWidth: 320, bottomHeight: 270, tab: 'analysis' };
+
 export function defaultSettings(): Settings {
-  return { engines: [], theme: 'system', fusekiEngineId: BUILTIN_ID, analysisMultiPv: 3, analysisSlots: ['auto'], builtinMethod: 'value', kifuAnalysisSec: 2 };
+  return {
+    engines: [],
+    theme: 'system',
+    fusekiEngineId: BUILTIN_ID,
+    analysisMultiPv: 3,
+    analysisSlots: ['auto'],
+    builtinMethod: 'value',
+    kifuAnalysisSec: 2,
+    layout: { ...DEFAULT_LAYOUT },
+  };
 }
 
 const KEY = 'settings';
@@ -93,10 +115,23 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     analysisSlots: Array.isArray(saved.analysisSlots) && saved.analysisSlots.length ? saved.analysisSlots : d.analysisSlots,
     builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
     kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,
+    layout: mergeLayout(saved.layout),
   };
   if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
   if (s.fusekiEngineId !== BUILTIN_ID && !engines.some((e) => e.id === s.fusekiEngineId)) s.fusekiEngineId = BUILTIN_ID;
   return s;
+}
+
+function mergeLayout(raw: Partial<LayoutSettings> | undefined): LayoutSettings {
+  const d = DEFAULT_LAYOUT;
+  if (!raw) return { ...d };
+  const num = (v: unknown, fallback: number, lo: number, hi: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
+  return {
+    recordWidth: num(raw.recordWidth, d.recordWidth, 200, 900),
+    bottomHeight: num(raw.bottomHeight, d.bottomHeight, 100, 1200),
+    tab: raw.tab === 'score' || raw.tab === 'winrate' ? raw.tab : 'analysis',
+  };
 }
 
 export async function loadSettings(): Promise<Settings> {

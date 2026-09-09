@@ -8,6 +8,7 @@ import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { normalEngine, type Settings } from '../settings.ts';
 import { evalOfInfo, type Target } from './analysis.ts';
+import { MAX_SCORE } from './graph.ts';
 
 export interface KifuAnalysisOptions {
   /** 何手目の局面から（棋譜の index。0 は開始局面） */
@@ -20,7 +21,7 @@ export interface KifuAnalysisDeps {
   createThinker(id: string, processTag: string): Thinker | null;
   /** 棋譜の各局面（index 順。choose の局面は含めない） */
   targets(): { index: number; target: Target }[];
-  onPoint(ply: number, pSente: number): void;
+  onPoint(ply: number, ev: { p: number; cp: number | null; approx: boolean }): void;
   /** 進み具合の文。null で終わり */
   onProgress(text: string | null): void;
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
@@ -87,7 +88,10 @@ export class KifuAnalyzer {
         }
         if (gen !== this.gen) break;
         const ev = last ? evalOfInfo(last, cfg.eval, target.turn) : null;
-        if (ev) this.deps.onPoint(target.ply, ev.pSente);
+        if (ev) {
+          const cp = ev.mate !== null ? (ev.mate > 0 ? MAX_SCORE : -MAX_SCORE) : ev.cp;
+          this.deps.onPoint(target.ply, { p: ev.pSente, cp, approx: ev.approx });
+        }
         done++;
       }
     } finally {
