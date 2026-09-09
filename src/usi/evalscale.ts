@@ -8,6 +8,8 @@
 // S=435・offset +34cp。他のエンジンには当てはまらないので、目盛りを持たないエンジンは
 // 一般的な 600 / 0 で始め、利用者が変えられる。
 
+import type { Key } from '../i18n.ts';
+
 export interface EvalScale {
   /** ロジスティックの幅。p = 1 / (1 + exp(−(cp − offset) / scale)) */
   scale: number;
@@ -28,16 +30,17 @@ export function pToCp(p: number, e: EvalScale = DEFAULT_EVAL): number {
 
 export interface EvalPreset {
   id: string;
-  label: string;
+  /** 文言は画面の言語で引く（i18n.ts の鍵） */
+  labelKey: Key;
   eval: EvalScale;
-  note: string;
+  noteKey: Key;
 }
 
 /** 設定画面の選択肢。値はここに閉じ、画面はこの表を並べるだけ */
 export const EVAL_PRESETS: EvalPreset[] = [
-  { id: 'generic', label: '一般（600 / 0）', eval: { scale: 600, offsetCp: 0 }, note: 'やねうら王系の慣例。dlshogi 系もこの目盛りで cp を出す' },
-  { id: 'suisho5-fv16', label: '水匠5 · FV_SCALE 16（実測 435 / +34）', eval: { scale: 435, offsetCp: 34 }, note: 'やねうら王に nn.bin を置いて FV_SCALE 16 で動かすとき。41 手目局面 5,569 局の実勝敗で較正' },
-  { id: 'suisho5-fv24', label: '水匠5の実行ファイル · FV_SCALE 24（652 / +51）', eval: { scale: 652, offsetCp: 51 }, note: '評価関数を埋め込んだ Suisho5-*.exe は FV_SCALE 24 固定。cp が 1.5 倍大きく出るぶんを比例で吸収した値（未実測）' },
+  { id: 'generic', labelKey: 'ep_generic_label', eval: { scale: 600, offsetCp: 0 }, noteKey: 'ep_generic_note' },
+  { id: 'suisho5-fv16', labelKey: 'ep_fv16_label', eval: { scale: 435, offsetCp: 34 }, noteKey: 'ep_fv16_note' },
+  { id: 'suisho5-fv24', labelKey: 'ep_fv24_label', eval: { scale: 652, offsetCp: 51 }, noteKey: 'ep_fv24_note' },
 ];
 
 export function presetOf(e: EvalScale): EvalPreset | null {
@@ -51,7 +54,7 @@ export interface Recipe {
   name: string;
   eval: EvalScale;
   kind: 'normal' | 'fuseki';
-  note: string;
+  noteKey: Key;
 }
 
 /**
@@ -59,10 +62,10 @@ export interface Recipe {
  * 一致しなくても普通に動く。追加はこの表に 1 行足す。
  */
 export const RECIPES: Recipe[] = [
-  { test: /Tenbin Fuseki Engine/i, name: '布石エンジン', eval: { scale: 435, offsetCp: 34 }, kind: 'fuseki', note: '布石 USI 拡張。勝率を直接出す' },
-  { test: /Suisho\s*5|水匠5/i, name: '水匠5', eval: { scale: 652, offsetCp: 51 }, kind: 'normal', note: '評価関数を埋め込んだ配布物（FV_SCALE 24）' },
-  { test: /YaneuraOu/i, name: 'やねうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', note: '評価関数は EvalDir。水匠5を FV_SCALE 16 で使うなら目盛りを 435 / +34 に' },
-  { test: /dlshogi|Fukauraou|ふかうら王/i, name: 'ふかうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', note: '勝率を 600 で cp に直して出す' },
+  { test: /Tenbin Fuseki Engine/i, name: '布石エンジン', eval: { scale: 435, offsetCp: 34 }, kind: 'fuseki', noteKey: 'rc_fuseki_note' },
+  { test: /Suisho\s*5|水匠5/i, name: '水匠5', eval: { scale: 652, offsetCp: 51 }, kind: 'normal', noteKey: 'rc_suisho_note' },
+  { test: /YaneuraOu/i, name: 'やねうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_yane_note' },
+  { test: /dlshogi|Fukauraou|ふかうら王/i, name: 'ふかうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_dl_note' },
 ];
 
 export function recipeFor(idName: string): Recipe | null {

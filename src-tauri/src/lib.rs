@@ -30,7 +30,8 @@ impl From<EngineEvent> for EngineEventPayload {
     }
 }
 
-#[tauri::command]
+// 起動と停止は子プロセスの終了を最長 2〜3 秒待つ。主スレッドで待つと窓が固まるので別スレッドで
+#[tauri::command(async)]
 fn engine_start(
     app: AppHandle,
     host: State<'_, Arc<EngineHost>>,
@@ -61,7 +62,7 @@ fn engine_send(host: State<'_, Arc<EngineHost>>, id: String, line: String) -> Re
     host.send(&id, &line)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn engine_stop(host: State<'_, Arc<EngineHost>>, id: String) -> Result<(), String> {
     host.stop(&id, Duration::from_secs(3))
 }

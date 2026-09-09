@@ -16,7 +16,14 @@ import { ALL_TABS, defaultPanes, type LayoutSettings, type PaneSettings, type Ta
 
 export type { TabId };
 
-export const TAB_LABEL: Record<TabId, string> = { play: '候補手', analysis: '検討', score: '評価値', winrate: '期待勝率' };
+import { t as tr, type Key } from '../i18n.ts';
+
+const TAB_KEY: Record<TabId, Key> = { play: 'tab_play', analysis: 'tab_analysis', score: 'tab_score', winrate: 'tab_winrate' };
+
+/** タブの名前。言語の設定は起動の途中で決まるので、読み込み時には固めず、そのつど引く */
+export function tabLabel(id: TabId): string {
+  return tr(TAB_KEY[id]);
+}
 
 export interface LayoutDeps {
   layout(): LayoutSettings;
@@ -80,7 +87,7 @@ export class Layout {
       const bar = document.createElement('div');
       bar.className = 'tabbar';
       bar.setAttribute('role', 'tablist');
-      bar.title = 'タブは掴んで別の欄へ移せます（右クリックで配置の窓）';
+      bar.title = tr('tabbar_title');
       bar.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         this.openMenu(document.getElementById('dialogs') ?? document.body);
@@ -105,8 +112,8 @@ export class Layout {
     b.dataset.tab = t;
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(active));
-    b.title = `${TAB_LABEL[t]}（掴んで別の欄へ移せます）`;
-    b.textContent = TAB_LABEL[t];
+    b.title = tr('tab_drag_title', { name: tabLabel(t) });
+    b.textContent = tabLabel(t);
     b.addEventListener('pointerdown', (e) => this.dragTab(e, b, t, pane));
     return b;
   }
@@ -133,7 +140,7 @@ export class Layout {
       if (!ghost) {
         ghost = document.createElement('div');
         ghost.className = 'tab-ghost';
-        ghost.textContent = TAB_LABEL[tab];
+        ghost.textContent = tabLabel(tab);
         document.body.appendChild(ghost);
         b.classList.add('dragging');
       }
@@ -326,7 +333,7 @@ export class Layout {
     el.tabIndex = 0;
     el.setAttribute('role', 'separator');
     el.setAttribute('aria-orientation', 'vertical');
-    el.setAttribute('aria-label', '欄の境');
+    el.setAttribute('aria-label', tr('pane_edge'));
     el.dataset.left = String(left);
     const resize = (x: number) => {
       const a = this.bottom.querySelector<HTMLElement>(`[data-pane="${left}"]`);
@@ -418,17 +425,17 @@ export class Layout {
       dlg.className = 'engine-dialog layout-dialog';
       dlg.innerHTML = `
         <form method="dialog" class="dialog-body">
-          <div class="dialog-head"><h2>下の欄の配置</h2></div>
-          <p class="hint">タブは掴んで別の欄へ移せます。欄の境と、盤・棋譜・下の欄の仕切りは掴むと動きます。</p>
+          <div class="dialog-head"><h2>${tr('layout_title')}</h2></div>
+          <p class="hint">${tr('layout_hint')}</p>
           <div class="preset-row">
-            <button type="button" data-preset="1">1 欄</button>
-            <button type="button" data-preset="2">2 欄（検討｜グラフ）</button>
-            <button type="button" data-preset="3">3 欄</button>
+            <button type="button" data-preset="1">${tr('layout_preset1')}</button>
+            <button type="button" data-preset="2">${tr('layout_preset2')}</button>
+            <button type="button" data-preset="3">${tr('layout_preset3')}</button>
           </div>
           <ul class="tab-places"></ul>
           <div class="dialog-actions">
-            <button type="button" data-act="reset">既定の配置に戻す</button>
-            <button type="submit">閉じる</button>
+            <button type="button" data-act="reset">${tr('layout_reset')}</button>
+            <button type="submit">${tr('close')}</button>
           </div>
         </form>`;
       host.appendChild(dlg);
@@ -458,10 +465,10 @@ export class Layout {
       const canLeft = i > 0 || !alone;
       const canRight = i < panes.length - 1 || !alone;
       return `<li>
-        <span class="place-name">${TAB_LABEL[t]}</span>
-        <span class="place-where">${panes.length === 1 ? '同じ欄' : `左から ${i + 1} 番目の欄`}</span>
-        <button type="button" data-move="${t}:-1"${canLeft ? '' : ' disabled'} aria-label="${TAB_LABEL[t]} を左の欄へ">←</button>
-        <button type="button" data-move="${t}:1"${canRight ? '' : ' disabled'} aria-label="${TAB_LABEL[t]} を右の欄へ">→</button>
+        <span class="place-name">${tabLabel(t)}</span>
+        <span class="place-where">${panes.length === 1 ? tr('layout_same_pane') : tr('layout_nth_pane', { n: i + 1 })}</span>
+        <button type="button" data-move="${t}:-1"${canLeft ? '' : ' disabled'} aria-label="${tr('layout_move_left', { name: tabLabel(t) })}">←</button>
+        <button type="button" data-move="${t}:1"${canRight ? '' : ' disabled'} aria-label="${tr('layout_move_right', { name: tabLabel(t) })}">→</button>
       </li>`;
     }).join('');
   }

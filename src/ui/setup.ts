@@ -5,6 +5,7 @@
 // どれを使うか（水匠5 は NNUE halfkp_256x2_32_32）は初めての人には分からない。
 // だから「自動で入れる」を用意して、選ばせずに済ませる。手で入れる道も残す。
 
+import { t } from '../i18n.ts';
 import { isTauri } from '../usi/engine.ts';
 import type { Settings } from '../settings.ts';
 import { checkUpdate, currentVersion } from './update.ts';
@@ -23,6 +24,8 @@ export interface SetupDeps {
   register(path: string, name: string, evalScale: { scale: number; offsetCp: number }): Promise<string | null>;
   /** 状態の行に出す */
   say(text: string, error?: boolean): void;
+  /** 更新を入れ替える直前にエンジンを止める */
+  beforeInstall(): Promise<void>;
 }
 
 async function reveal(path: string): Promise<void> {
@@ -62,7 +65,7 @@ export class SetupDialog {
           break;
         case 'update':
           this.dialog.close();
-          void checkUpdate(false, { say: this.deps.say });
+          void checkUpdate(false, { say: this.deps.say, beforeInstall: this.deps.beforeInstall });
           break;
       }
     });
@@ -75,7 +78,7 @@ export class SetupDialog {
   }
 
   private note(text: string, percent?: number): void {
-    this.lastNote = percent === undefined ? text : `${text}（${percent}%）`;
+    this.lastNote = percent === undefined ? text : t('su_note_percent', { text, percent });
     const el = this.dialog.querySelector('.install-note');
     if (el) el.textContent = this.lastNote;
   }
@@ -84,7 +87,7 @@ export class SetupDialog {
   private async install(): Promise<void> {
     if (this.installing) return;
     if (!isTauri()) {
-      this.note('アプリの中でだけできます');
+      this.note(t('su_app_only'));
       return;
     }
     this.installing = true;
@@ -95,16 +98,16 @@ export class SetupDialog {
       const { listen } = await import('@tauri-apps/api/event');
       const { invoke } = await import('@tauri-apps/api/core');
       un = await listen<{ text: string; percent: number }>('engine-install', (e) => this.note(e.payload.text, e.payload.percent));
-      this.note('始めています…', 0);
+      this.note(t('su_starting'), 0);
       const path = await invoke<string>('install_recommended_engine');
-      this.note('登録しています…', 100);
+      this.note(t('su_registering'), 100);
       const err = await this.deps.register(path, AUTO_NAME, AUTO_EVAL);
-      this.note(err ? `入れましたが、起動できませんでした: ${err}` : `入りました。${AUTO_NAME} を本将棋の既定にしました`);
-      this.deps.say(err ? `エンジンを入れましたが起動できません: ${err}` : `${AUTO_NAME} を入れました`, !!err);
+      this.note(err ? t('su_installed_but_failed', { msg: err }) : t('su_installed', { name: AUTO_NAME }));
+      this.deps.say(err ? t('su_say_failed', { msg: err }) : t('su_say_installed', { name: AUTO_NAME }), !!err);
       this.paint();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.note(`入れられません: ${msg}`);
+      this.note(t('su_install_failed', { msg }));
     } finally {
       un?.();
       this.installing = false;
@@ -116,43 +119,41 @@ export class SetupDialog {
   private paint(): void {
     const n = this.deps.settings().engines.length;
     const dir = (label: string, path: string) =>
-      `<div class="dir-row"><span class="dir-label">${label}</span><code class="dir-path">${path || '（アプリの中でだけ分かります）'}</code>${
-        path ? `<button type="button" data-act="open-dir" data-dir="${path}">開く</button>` : ''
+      `<div class="dir-row"><span class="dir-label">${label}</span><code class="dir-path">${path || t('su_dir_unknown')}</code>${
+        path ? `<button type="button" data-act="open-dir" data-dir="${path}">${t('su_open')}</button>` : ''
       }</div>`;
     this.dialog.innerHTML = `
       <div class="dialog-body setup-body">
-        <div class="dialog-head"><h2>はじめに</h2><span class="hint">${this.version ? `版 ${this.version}` : ''}</span></div>
+        <div class="dialog-head"><h2>${t('su_title')}</h2><span class="hint">${this.version ? t('su_version', { version: this.version }) : ''}</span></div>
         <p class="hint">
-          布石（1〜40手目）はアプリの中の評価で動きます。<b>41手目からの本将棋にはエンジンが要ります。</b>
-          ${n === 0 ? 'まだ 1 本も登録されていません。' : `いま ${n} 本登録されています。`}
+          ${t('su_intro')}
+          ${n === 0 ? t('su_none_yet') : t('su_count', { n })}
         </p>
 
         <section class="setup-step">
           <div class="setup-actions">
-            <button type="button" class="primary" data-act="install">エンジンを自動で入れる</button>
-            <span class="hint">やねうら王＋水匠5 を公式の配布先から取って登録します（約 40MB）</span>
+            <button type="button" class="primary" data-act="install">${t('su_install')}</button>
+            <span class="hint">${t('su_install_hint')}</span>
           </div>
           <div class="install-note">${this.lastNote}</div>
         </section>
 
         <section class="setup-step">
-          <h3>自分で入れるなら</h3>
-          <p class="hint">実行ファイルをエンジンのフォルダに置いて「エンジン」→「フォルダから取り込む」。
-            やねうら王なら隣に <code>eval/nn.bin</code>（水匠5）を置き、目盛りは <b>652 / +51</b>。</p>
-          ${dir('エンジン', this.enginesDir)}
+          <h3>${t('su_manual_head')}</h3>
+          <p class="hint">${t('su_manual_body')}</p>
+          ${dir(t('su_dir_engines'), this.enginesDir)}
         </section>
 
         <section class="setup-step">
-          <h3>アンインストール</h3>
-          <p class="hint">Windows の「設定 → アプリ」から天秤将棋を消します。設定と入れたエンジンは下のフォルダに残るので、
-            そこも消せば何も残りません（設定をまっさらにしたいときも、このフォルダを消してから起動します）。</p>
-          ${dir('データ', this.dataDir)}
+          <h3>${t('su_uninstall_head')}</h3>
+          <p class="hint">${t('su_uninstall_body')}</p>
+          ${dir(t('su_dir_data'), this.dataDir)}
         </section>
 
         <div class="dialog-actions">
-          <button type="button" data-act="engines">エンジンの登録</button>
-          <button type="button" data-act="update">更新を確認</button>
-          <button type="button" class="primary" data-act="close">閉じる</button>
+          <button type="button" data-act="engines">${t('su_engines_btn')}</button>
+          <button type="button" data-act="update">${t('su_update_btn')}</button>
+          <button type="button" class="primary" data-act="close">${t('close')}</button>
         </div>
       </div>`;
   }

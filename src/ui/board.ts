@@ -9,7 +9,8 @@
 //     後手の駒は回転済みの別ファイル（1*.svg）で、CSS では回さない。反転時は色と絵の対応を入れ替える
 
 import type { BoardSnapshot, Color, Phase, Piece } from '../state/game.ts';
-import { colorMark, colorName } from '../state/game.ts';
+import { colorMark, roleName } from '../state/game.ts';
+import { lang, sideName, t } from '../i18n.ts';
 import type { ClockView } from '../state/clock.ts';
 import type { Role as OpsRole } from 'shogiops/types';
 
@@ -50,6 +51,8 @@ type Selection = { kind: 'hand'; color: Color; role: OpsRole } | { kind: 'square
 const FILES = ['9', '8', '7', '6', '5', '4', '3', '2', '1'];
 const RANKS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
 const RANK_KANJI = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+/** 英語のときの段。符号が "P-76" の数字2つなので、盤の目盛りも数字で揃える */
+const RANK_NUM = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 /** 駒台の並び（手前の対局者から見て左上→右下）。奥の対局者は逆順にして、その人から見て同じ並びにする */
 const STAND_ORDER: OpsRole[] = ['king', 'rook', 'bishop', 'gold', 'silver', 'knight', 'lance', 'pawn'];
 const STAND_ORDER_NO_KING: OpsRole[] = ['rook', 'bishop', 'gold', 'silver', 'knight', 'lance', 'pawn'];
@@ -96,7 +99,7 @@ export class Board {
       </div>
       <div class="board-wrap">
         <div class="files"></div>
-        <div class="board"><div class="grid" role="grid" aria-label="将棋盤"></div><svg class="shapes" viewBox="0 0 ${SQ_W * 9} ${SQ_H * 9}" aria-hidden="true"></svg></div>
+        <div class="board"><div class="grid" role="grid" aria-label="${t('board_aria')}"></div><svg class="shapes" viewBox="0 0 ${SQ_W * 9} ${SQ_H * 9}" aria-hidden="true"></svg></div>
         <div class="ranks"></div>
       </div>
       <div class="stand near">
@@ -170,7 +173,8 @@ export class Board {
       }
     }
     this.filesEl.innerHTML = files.map((f) => `<span>${f}</span>`).join('');
-    this.ranksEl.innerHTML = ranks.map((r) => `<span>${RANK_KANJI[r.charCodeAt(0) - 97]}</span>`).join('');
+    const rankLabels = lang() === 'en' ? RANK_NUM : RANK_KANJI;
+    this.ranksEl.innerHTML = ranks.map((r) => `<span>${rankLabels[r.charCodeAt(0) - 97]}</span>`).join('');
     this.standFar.dataset.color = this.orientation === 'sente' ? 'gote' : 'sente';
     this.standNear.dataset.color = this.orientation;
   }
@@ -274,7 +278,7 @@ export class Board {
         c.textContent = String(n);
         slot.appendChild(c);
       }
-      slot.setAttribute('aria-label', `${colorName(color)}の持ち駒 ${role} ${n}枚`);
+      slot.setAttribute('aria-label', t('hand_aria', { side: sideName(color), role: roleName(role), n }));
       el.appendChild(slot);
     }
     el.classList.toggle('with-king', withKing);
@@ -285,7 +289,7 @@ export class Board {
     const o = this.options;
     if (!s || !o) return;
     const plate = this.plateFor(color);
-    const name = o.names?.[color] || colorName(color);
+    const name = o.names?.[color] || sideName(color);
     plate.replaceChildren();
     const mark = document.createElement('span');
     mark.className = 'plate-mark';
@@ -297,25 +301,25 @@ export class Board {
     const active = !o.edit && s.turn === color && o.phase !== 'over' && o.phase !== 'choose';
     plate.classList.toggle('to-move', active);
     if (active) {
-      const t = document.createElement('span');
+      const tn = document.createElement('span');
       // エンジンが考えているあいだは、動く印を出す（長考でも画面が止まって見えないように）
       const thinking = o.thinking === color;
-      t.className = 'plate-turn' + (thinking ? ' thinking' : '');
-      t.textContent = thinking ? '考え中' : '手番';
+      tn.className = 'plate-turn' + (thinking ? ' thinking' : '');
+      tn.textContent = t(thinking ? 'plate_thinking' : 'plate_to_move');
       if (thinking) {
         const dots = document.createElement('span');
         dots.className = 'thinking-dots';
         dots.setAttribute('aria-hidden', 'true');
         dots.innerHTML = '<i></i><i></i><i></i>';
-        t.append(' ', dots);
+        tn.append(' ', dots);
       }
-      plate.appendChild(t);
+      plate.appendChild(tn);
     }
     const ck = o.clocks?.[color];
     if (ck) {
       const c = document.createElement('span');
       c.className = 'plate-clock' + (ck.running ? ' running' : '') + (ck.inByoyomi ? ' byoyomi' : '');
-      c.textContent = ck.inByoyomi && ck.byoyomi !== null ? `秒読み ${ck.byoyomi}` : ck.main;
+      c.textContent = ck.inByoyomi && ck.byoyomi !== null ? t('plate_byoyomi', { sec: ck.byoyomi }) : ck.main;
       plate.appendChild(c);
     }
   }

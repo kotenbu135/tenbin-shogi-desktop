@@ -4,6 +4,7 @@
 // 使うエンジンは検討の「自動」と同じ（布石は既定の布石評価、41 手目からは既定の本将棋エンジン）。
 // 検討の枠とは別のプロセスを立てる（枠の検討を止めずに済む）。内蔵の評価は 1 つしか無いので共用。
 
+import { t } from '../i18n.ts';
 import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { normalEngine, type Settings } from '../settings.ts';
@@ -38,11 +39,11 @@ export class KifuAnalyzer {
     let th = this.pool.get(id);
     if (!th) {
       th = this.deps.createThinker(id, 'kifu') ?? undefined;
-      if (!th) throw new Error('エンジンが登録から消えている');
+      if (!th) throw new Error(t('ka_no_engine'));
       th.onLog = (dir, text) => this.deps.onLog(th!.config.name || th!.config.path, dir, text);
       this.pool.set(id, th);
     }
-    if (th.state === 'stopped') {
+    if (th.state === 'stopped' || th.state === 'starting') {
       await th.start();
       await th.newGame();
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', 1);
@@ -75,14 +76,15 @@ export class KifuAnalyzer {
         const th = await this.thinker(id);
         if (gen !== this.gen) break;
         const cfg: EngineConfig = th.config;
-        this.deps.onProgress(`棋譜解析 ${done + 1} / ${all.length} 局面 · ${target.ply} 手目 · ${cfg.name || cfg.path}`);
+        this.deps.onProgress(t('ka_progress', { done: done + 1, all: all.length, ply: target.ply, engine: cfg.name || cfg.path }));
         let last: UsiInfo | null = null;
         try {
+          if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', target.mode === 'tenbin' ? 'tenbin' : 'fuseki');
           await th.go(target.positionCmd, `movetime ${Math.round(opts.secPerMove * 1000)}`, (info) => {
             if ((info.multipv ?? 1) === 1 && (info.scoreCp !== undefined || info.scoreMate !== undefined || info.winrate !== undefined)) last = info;
           });
         } catch (e) {
-          this.deps.onLog(cfg.name || cfg.path, 'sys', `棋譜解析 ${target.ply} 手目: ${e instanceof Error ? e.message : String(e)}`);
+          this.deps.onLog(cfg.name || cfg.path, 'sys', t('ka_error', { ply: target.ply, msg: e instanceof Error ? e.message : String(e) }));
           skipped++;
           continue;
         }
@@ -100,7 +102,7 @@ export class KifuAnalyzer {
         this.deps.onProgress(null);
       }
     }
-    if (skipped && gen === this.gen) this.deps.onLog('棋譜解析', 'sys', `${skipped} 局面を飛ばした（その段階のエンジンが無い、または評価が返らない）`);
+    if (skipped && gen === this.gen) this.deps.onLog(t('ka_label'), 'sys', t('ka_skipped', { n: skipped }));
     return done;
   }
 
@@ -133,7 +135,7 @@ export function askKifuAnalysis(host: HTMLElement, defaults: { secPerMove: numbe
         <label><input type="radio" name="range" value="all" ${defaults.hasCursor ? '' : 'checked'} /> 最初から最後まで</label>
         <label><input type="radio" name="range" value="here" ${defaults.hasCursor ? 'checked' : ''} ${defaults.hasCursor ? '' : 'disabled'} /> 表示中の局面（${defaults.cursorPly} 手目）から最後まで</label>
       </fieldset>
-      <label class="sec-row">1 局面の秒数 <input name="sec" type="number" min="0.2" max="600" step="0.1" value="${defaults.secPerMove}" /></label>
+      <label class="sec-row">${t('ka_sec_row')} <input name="sec" type="number" min="0.2" max="600" step="0.1" value="${defaults.secPerMove}" /></label>
       <div class="dialog-actions">
         <button type="button" data-act="cancel">やめる</button>
         <button type="submit" class="primary" data-act="ok">解析を始める</button>

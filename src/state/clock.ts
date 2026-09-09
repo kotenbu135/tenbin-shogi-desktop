@@ -40,6 +40,8 @@ export class Clock {
   private totalSec: Record<Color, number> = { sente: 0, gote: 0 };
   private running: Color | null = null;
   private startedAt = 0;
+  /** 一時停止した時刻。止めている間は経過時間をここで凍らせる */
+  private pausedAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   onTick: (() => void) | null = null;
   onTimeout: ((loser: Color) => void) | null = null;
@@ -58,12 +60,28 @@ export class Clock {
     this.stopTimer();
     this.running = color;
     this.startedAt = performance.now();
+    this.pausedAt = null;
     if (!this.enabled) return;
     this.timer = setInterval(() => this.tick(), 200);
   }
 
+  /** 一時停止。手番はそのまま、ここまでの経過時間を保って止める */
+  pause(): void {
+    if (!this.running || this.pausedAt !== null) return;
+    this.pausedAt = performance.now();
+    this.stopTimer();
+  }
+
+  /** 一時停止から続ける。止めていた分だけ開始時刻をずらす */
+  resume(): void {
+    if (this.pausedAt === null) return;
+    this.startedAt += performance.now() - this.pausedAt;
+    this.pausedAt = null;
+    if (this.enabled && this.running) this.timer = setInterval(() => this.tick(), 200);
+  }
+
   private elapsedMs(): number {
-    return this.running ? performance.now() - this.startedAt : 0;
+    return this.running ? (this.pausedAt ?? performance.now()) - this.startedAt : 0;
   }
 
   private tick(): void {
@@ -109,10 +127,33 @@ export class Clock {
     return Math.max(0, Math.round(this.remainingMs_[color] - (running ? this.elapsedMs() : 0)));
   }
 
+  /**
+   * 先手と後手の枠を入れ替える。天秤将棋で先後が決まる前は席ごとの枠（置く側＝先手の枠、
+   * 選ぶ側＝後手の枠）で計っているので、選ぶ側が先手を取ったときに呼ぶ
+   */
+  swap(): void {
+    this.remainingMs_ = { sente: this.remainingMs_.gote, gote: this.remainingMs_.sente };
+    this.totalSec = { sente: this.totalSec.gote, gote: this.totalSec.sente };
+    if (this.running) this.running = this.running === 'sente' ? 'gote' : 'sente';
+  }
+
+  /**
+   * 記録された消費時間から残り時間を組み直す。巻き戻し（待った・分岐）で使う。
+   * 時間切れで 0 にした枠もここで戻るので、戻した直後にまた切れることがない。
+   */
+  restore(spent: Record<Color, number>): void {
+    const m = (this.control?.mainSec ?? 0) * 1000;
+    for (const c of ['sente', 'gote'] as const) {
+      this.totalSec[c] = spent[c];
+      this.remainingMs_[c] = Math.max(0, m - spent[c] * 1000);
+    }
+  }
+
   /** 対局が終わったら止める。 */
   stop(): void {
     this.stopTimer();
     this.running = null;
+    this.pausedAt = null;
   }
 
   private stopTimer(): void {
@@ -122,8 +163,8 @@ export class Clock {
 
   view(color: Color): ClockView | null {
     if (!this.enabled || !this.control) return null;
-    const running = this.running === color;
-    const used = running ? this.elapsedMs() : 0;
+    const running = this.running === color && this.pausedAt === null;
+    const used = this.running === color ? this.elapsedMs() : 0;
     const mainLeft = this.remainingMs_[color] - used;
     if (mainLeft > 0) {
       return { main: hms(mainLeft / 1000), byoyomi: null, inByoyomi: false, running };

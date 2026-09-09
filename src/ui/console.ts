@@ -1,5 +1,6 @@
 // USI の生ログ。エンジンとの往復をそのまま見せ、手で1行送れる。
 
+import { t } from '../i18n.ts';
 import type { LogDirection } from '../usi/engine.ts';
 
 const MAX_LINES = 2000;
@@ -12,9 +13,9 @@ export class UsiConsole {
 
   constructor(private readonly root: HTMLElement) {
     root.innerHTML = `
-      <div class="console-head"><span>USI ログ</span><button type="button" class="link" data-act="clear">消す</button><button type="button" class="link" data-act="close">閉じる</button></div>
+      <div class="console-head"><span>${t('usi_log')}</span><button type="button" class="link" data-act="clear">${t('usi_clear')}</button><button type="button" class="link" data-act="close">${t('close')}</button></div>
       <pre class="console-body" aria-live="polite"></pre>
-      <form class="console-form"><input type="text" spellcheck="false" placeholder="エンジンへ送る行（例: isready）" /><button type="submit">送る</button></form>`;
+      <form class="console-form"><input type="text" spellcheck="false" placeholder="${t('usi_send_placeholder')}" /><button type="submit">${t('usi_send')}</button></form>`;
     this.pre = root.querySelector('.console-body')!;
     this.input = root.querySelector('input')!;
     root.querySelector('[data-act="clear"]')!.addEventListener('click', () => {

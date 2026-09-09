@@ -9,7 +9,8 @@
 
 import type { Role as OpsRole } from 'shogiops/types';
 import type { BoardSnapshot, Color, Piece } from '../state/game.ts';
-import { HIRATE_SFEN, ROLE_KANJI } from '../state/game.ts';
+import { HIRATE_SFEN, roleName } from '../state/game.ts';
+import { sideName, t } from '../i18n.ts';
 import { parseSfen } from 'shogiops/sfen';
 import { makeSquareName } from 'shogiops/util';
 import { pieceEl } from './board.ts';
@@ -182,9 +183,9 @@ export class PositionEditor {
   validate(): string | null {
     const kings = { sente: 0, gote: 0 };
     for (const p of this.pieces.values()) if (p.role === 'king') kings[p.color]++;
-    if (kings.sente !== 1 || kings.gote !== 1) return '玉は先手・後手に1枚ずつ置いてください';
+    if (kings.sente !== 1 || kings.gote !== 1) return t('ed_need_kings');
     const r = parseSfen('standard', this.toSfen(), false);
-    if (r.isErr) return `局面として成り立ちません: ${r.error.message}`;
+    if (r.isErr) return t('ed_bad_position', { msg: r.error.message });
     return null;
   }
 
@@ -193,7 +194,7 @@ export class PositionEditor {
     root.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'editor-head';
-    head.innerHTML = `<span class="editor-title">局面編集</span><span class="editor-hint">駒を選んでマスへ。盤の駒を押すと手に持ち、もう一度同じマスを押すと成・不成が切り替わります。</span>`;
+    head.innerHTML = `<span class="editor-title">${t('ed_title')}</span><span class="editor-hint">${t('ed_hint')}</span>`;
     root.appendChild(head);
 
     const body = document.createElement('div');
@@ -203,7 +204,7 @@ export class PositionEditor {
       row.className = 'palette-row';
       const lab = document.createElement('span');
       lab.className = 'palette-label';
-      lab.textContent = color === 'sente' ? '☗先手' : '☖後手';
+      lab.textContent = t(color === 'sente' ? 'ed_side_sente' : 'ed_side_gote');
       row.appendChild(lab);
       for (const role of PALETTE_ROLES) {
         const b = document.createElement('button');
@@ -211,7 +212,7 @@ export class PositionEditor {
         b.className = 'palette-piece';
         const sel = this.tool?.kind === 'piece' && !this.tool.fromSquare && this.tool.piece.color === color && this.tool.piece.role === role;
         b.classList.toggle('selected', sel);
-        b.title = `${color === 'sente' ? '先手' : '後手'}の${ROLE_KANJI[role]}`;
+        b.title = t('ed_piece_title', { side: sideName(color), role: roleName(role) });
         b.appendChild(pieceEl({ color, role }));
         b.addEventListener('click', () => {
           this.tool = sel ? null : { kind: 'piece', piece: { color, role } };
@@ -226,7 +227,7 @@ export class PositionEditor {
     tools.className = 'editor-tools';
     const erase = document.createElement('button');
     erase.type = 'button';
-    erase.textContent = '消す';
+    erase.textContent = t('ed_erase');
     erase.classList.toggle('selected', this.tool?.kind === 'erase');
     erase.addEventListener('click', () => {
       this.tool = this.tool?.kind === 'erase' ? null : { kind: 'erase' };
@@ -235,17 +236,23 @@ export class PositionEditor {
     });
     const holding = document.createElement('span');
     holding.className = 'editor-holding';
-    holding.textContent = this.tool?.kind === 'piece'
-      ? `手に持っている駒: ${this.tool.piece.color === 'sente' ? '☗' : '☖'}${ROLE_KANJI[this.tool.piece.role]}`
-      : this.tool?.kind === 'erase' ? '消す: 押したマスの駒を取り除きます' : '';
+    holding.textContent =
+      this.tool?.kind === 'piece'
+        ? t('ed_holding', {
+            mark: this.tool.piece.color === 'sente' ? '☗' : '☖',
+            role: roleName(this.tool.piece.role),
+          })
+        : this.tool?.kind === 'erase'
+          ? t('ed_erase_hint')
+          : '';
     tools.append(erase, holding);
     body.appendChild(tools);
 
     const turnRow = document.createElement('div');
     turnRow.className = 'editor-turn';
-    turnRow.innerHTML = `<span>手番</span>
-      <label><input type="radio" name="edit-turn" value="sente" ${this.turn === 'sente' ? 'checked' : ''}/> ☗先手</label>
-      <label><input type="radio" name="edit-turn" value="gote" ${this.turn === 'gote' ? 'checked' : ''}/> ☖後手</label>`;
+    turnRow.innerHTML = `<span>${t('ed_turn')}</span>
+      <label><input type="radio" name="edit-turn" value="sente" ${this.turn === 'sente' ? 'checked' : ''}/> ${t('ed_side_sente')}</label>
+      <label><input type="radio" name="edit-turn" value="gote" ${this.turn === 'gote' ? 'checked' : ''}/> ${t('ed_side_gote')}</label>`;
     turnRow.addEventListener('change', (e) => {
       const v = (e.target as HTMLInputElement).value as Color;
       this.turn = v;
@@ -264,10 +271,10 @@ export class PositionEditor {
       actions.appendChild(b);
       return b;
     };
-    mk('平手の初期配置', '', () => this.loadSfen(HIRATE_SFEN));
-    mk('盤を空にする', '', () => this.clear());
-    mk('やめる', '', () => this.deps.onCancel());
-    mk('この局面から本将棋を始める', 'primary', () => {
+    mk(t('ed_hirate'), '', () => this.loadSfen(HIRATE_SFEN));
+    mk(t('ed_clear'), '', () => this.clear());
+    mk(t('cancel'), '', () => this.deps.onCancel());
+    mk(t('ed_start'), 'primary', () => {
       const why = this.validate();
       if (why) {
         alert(why);

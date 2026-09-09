@@ -38,6 +38,10 @@ struct Running {
 #[derive(Default)]
 pub struct EngineHost {
     engines: Mutex<HashMap<String, Running>>,
+    /// 起動と停止を直列にする錠。`engines` の錠は spawn の間だけ手放すので、
+    /// これが無いと同じ id の start と stop が交差し、表から消えた子プロセスが走り続ける
+    /// （Tauri の command を async にして、主スレッドによる直列化が消えたため）。
+    ops: Mutex<()>,
 }
 
 /// 起動の指定。
@@ -65,8 +69,13 @@ impl EngineHost {
 
     /// エンジンを起動する。同じ id が動いていれば先に止める。
     pub fn start(&self, id: &str, launch: Launch, sink: EventSink) -> Result<(), String> {
+        let _ops = self.ops.lock().unwrap();
+        self.start_locked(id, launch, sink)
+    }
+
+    fn start_locked(&self, id: &str, launch: Launch, sink: EventSink) -> Result<(), String> {
         if self.is_running(id) {
-            self.stop(id, Duration::from_secs(2))?;
+            self.stop_locked(id, Duration::from_secs(2))?;
         }
         let cwd = match &launch.cwd {
             Some(c) => c.clone(),
@@ -116,6 +125,11 @@ impl EngineHost {
     /// `quit` を送って `grace` だけ待ち、終わらなければ殺す。
     /// 終了イベントは読み取りスレッドが stdout の EOF で出す。
     pub fn stop(&self, id: &str, grace: Duration) -> Result<(), String> {
+        let _ops = self.ops.lock().unwrap();
+        self.stop_locked(id, grace)
+    }
+
+    fn stop_locked(&self, id: &str, grace: Duration) -> Result<(), String> {
         let mut r = match self.engines.lock().unwrap().remove(id) {
             Some(r) => r,
             None => return Ok(()),
@@ -140,8 +154,9 @@ impl EngineHost {
 
     /// 全部止める。アプリ終了時に呼ぶ。
     pub fn stop_all(&self, grace: Duration) {
+        let _ops = self.ops.lock().unwrap();
         for id in self.ids() {
-            let _ = self.stop(&id, grace);
+            let _ = self.stop_locked(&id, grace);
         }
     }
 }
@@ -165,12 +180,20 @@ where
 {
     thread::spawn(move || {
         let mut buf = BufReader::new(reader);
-        let mut line = String::new();
+        // read_line は UTF-8 でない行で Err を返し、EOF と区別がつかない。Shift_JIS で日本語を出す
+        // エンジンの 1 行で読み取りが終わり、生きているプロセスに Exit を出してしまうので、バイト列で読む
+        let mut raw: Vec<u8> = Vec::new();
         loop {
-            line.clear();
-            match buf.read_line(&mut line) {
+            raw.clear();
+            match buf.read_until(b'\n', &mut raw) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {
+                    // UTF-8 で読めなければ Shift_JIS とみなす。日本語 Windows 向けのエンジンは
+                    // `id name` や `info string` を Shift_JIS で出す（置換文字にすると読めなくなる）
+                    let line = match std::str::from_utf8(&raw) {
+                        Ok(s) => std::borrow::Cow::Borrowed(s),
+                        Err(_) => encoding_rs::SHIFT_JIS.decode(&raw).0,
+                    };
                     let l = line.trim_end_matches(['\r', '\n']).to_string();
                     sink(match stream {
                         Stream::Stdout => EngineEvent::Line { id: id.clone(), line: l },
@@ -199,6 +222,34 @@ mod tests {
             }
         }
         panic!("cat が無い環境ではこのテストは走らない");
+    }
+
+    /// 日本語 Windows 向けのエンジンは `id name` を Shift_JIS で出す。置換文字にせず読めること。
+    #[cfg(unix)]
+    #[test]
+    fn shift_jis_line_is_decoded() {
+        let host = EngineHost::new();
+        let (tx, rx) = mpsc::channel();
+        let sink: EventSink = Arc::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        host.start("sjis", Launch { path: cat_path(), args: vec![], cwd: None }, sink).unwrap();
+        // 「やねうら王」の Shift_JIS
+        let bytes: Vec<u8> = b"id name "
+            .iter()
+            .copied()
+            .chain([0x82, 0xE2, 0x82, 0xCB, 0x82, 0xA4, 0x82, 0xE7, 0x89, 0xA4])
+            .collect();
+        {
+            let mut map = host.engines.lock().unwrap();
+            let r = map.get_mut("sjis").unwrap();
+            r.stdin.write_all(&bytes).unwrap();
+            r.stdin.write_all(b"\n").unwrap();
+            r.stdin.flush().unwrap();
+        }
+        let ev = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(ev, EngineEvent::Line { id: "sjis".into(), line: "id name やねうら王".into() });
+        host.stop("sjis", Duration::from_secs(2)).unwrap();
     }
 
     #[cfg(unix)]

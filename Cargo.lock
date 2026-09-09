@@ -4447,7 +4447,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tenbin-shogi"
+name = "tenbin-shogi-gui"
 version = "0.3.0"
 dependencies = [
  "encoding_rs",
@@ -4953,6 +4953,9 @@ dependencies = [
 [[package]]
 name = "usi-host"
 version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+]
 
 [[package]]
 name = "utf8_iter"

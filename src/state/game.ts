@@ -16,6 +16,8 @@ import { parseSfen } from 'shogiops/sfen';
 import { makeSquareName, parseSquareName, parseUsi } from 'shogiops/util';
 import { handRoles, pieceCanPromote, pieceForcePromote } from 'shogiops/variant/util';
 import { makeJapaneseMoveOrDrop } from 'shogiops/notation/japanese';
+import { makeWesternMoveOrDrop } from 'shogiops/notation/western';
+import { lang, sideName, t } from '../i18n.ts';
 import type { Shogi } from 'shogiops/variant/shogi';
 import type { MoveOrDrop, Piece as OpsPiece, Role as OpsRole, Square } from 'shogiops/types';
 import { BLACK, WHITE, type Drop, type Fuseki } from '../rules/fuseki.ts';
@@ -38,8 +40,10 @@ export interface MoveRecord {
   color: Color | null;
   /** "P*7g" / "7g7f" / "choose:sente" / "resign" / "timeout" */
   usi: string;
-  /** 符号 "７六歩"（先後の記号は付けない。表示側が ☗☖ を添える） */
+  /** 符号 "７六歩"（先後の記号は付けない。表示側が ☗☖ を添える）。KIF と同じ日本語表記 */
   text: string;
+  /** 英語表記の符号 "P-76"（shogiops の western）。画面が英語のときに出す */
+  textEn: string;
   phase: Phase;
   time?: MoveTime;
 }
@@ -56,9 +60,35 @@ export interface BoardSnapshot {
   checkSquare: string | null;
 }
 
+/**
+ * 終局の理由。文言ではなく形で持つ（言語を変えても出し直せるように）。
+ * 'other' は shogiops が返した英語の結果（'stalemate' など）をそのまま包む。
+ */
+export type OverReason =
+  | { kind: 'resign' | 'timeout'; loser: Color }
+  | { kind: 'ruling41' }
+  | { kind: 'mate' }
+  | { kind: 'other'; result: string };
+
 export interface GameOver {
   winner: Color | null;
-  reason: string;
+  reason: OverReason;
+}
+
+/** 終局の理由を画面の言葉にする */
+export function overReasonText(r: OverReason): string {
+  switch (r.kind) {
+    case 'resign':
+      return t('over_resign', { side: sideName(r.loser) });
+    case 'timeout':
+      return t('over_timeout', { side: sideName(r.loser) });
+    case 'ruling41':
+      return t('over_ruling41');
+    case 'mate':
+      return t('over_mate');
+    default:
+      return r.result || t('over_other');
+  }
 }
 
 /** 棋譜のある地点の局面。過去の局面を見る・検討するときに使う。 */
@@ -86,6 +116,17 @@ export const ROLE_KANJI: Record<string, string> = {
   pawn: '歩', lance: '香', knight: '桂', silver: '銀', gold: '金', bishop: '角', rook: '飛', king: '玉',
   tokin: 'と', promotedlance: '成香', promotedknight: '成桂', promotedsilver: '成銀', horse: '馬', dragon: '龍',
 };
+/** 英語の駒名。成駒は「+銀」の形に倣って + を付ける（英語圏の棋譜で通る書き方） */
+const ROLE_EN: Record<string, string> = {
+  pawn: 'pawn', lance: 'lance', knight: 'knight', silver: 'silver', gold: 'gold', bishop: 'bishop', rook: 'rook', king: 'king',
+  tokin: 'tokin', promotedlance: '+lance', promotedknight: '+knight', promotedsilver: '+silver', horse: 'horse', dragon: 'dragon',
+};
+
+/** 駒の呼び名。画面の言語で選ぶ */
+export function roleName(role: string): string {
+  return lang() === 'en' ? (ROLE_EN[role] ?? role) : (ROLE_KANJI[role] ?? role);
+}
+
 export const USI_OF_ROLE: Record<string, string> = {
   pawn: 'P', lance: 'L', knight: 'N', silver: 'S', gold: 'G', bishop: 'B', rook: 'R', king: 'K',
 };
@@ -99,6 +140,22 @@ export function squareText(sq: string): string {
   const f = Number(sq[0]);
   const r = sq.charCodeAt(1) - 'a'.charCodeAt(0);
   return `${FILE_ZEN[f - 1] ?? sq[0]}${RANK_KANJI[r] ?? sq[1]}`;
+}
+
+/** マス "7g" を英語表記の "77" にする（shogiops の western と同じ数字2つ） */
+export function squareNumber(sq: string): string {
+  const r = sq.charCodeAt(1) - 'a'.charCodeAt(0) + 1;
+  return `${sq[0]}${r}`;
+}
+
+/** マスの呼び方。画面の言語で「７六」と "76" を選ぶ */
+export function squareLabel(sq: string): string {
+  return lang() === 'en' ? squareNumber(sq) : squareText(sq);
+}
+
+/** 棋譜に出す符号。画面の言語で日本語表記と英語表記を選ぶ */
+export function moveText(m: MoveRecord): string {
+  return lang() === 'en' ? m.textEn : m.text;
 }
 
 export function colorMark(c: Color): string {
@@ -129,7 +186,7 @@ export class Game {
     if (mode === 'position') {
       const sfen = startSfen ?? HIRATE_SFEN;
       const r = parseSfen('standard', sfen, false);
-      if (r.isErr) throw new Error(`局面を読めない: ${r.error.message}`);
+      if (r.isErr) throw new Error(t('err_read_position', { msg: r.error.message }));
       this.pos = r.value;
       this.startSfen = sfen;
     }
@@ -153,6 +210,15 @@ export class Game {
   get turn(): Color {
     if (this.pos) return this.pos.turn;
     return this.fuseki.turn === BLACK ? 'sente' : 'gote';
+  }
+
+  /**
+   * いま動いている側の色。天秤将棋で先後が決まる前は、両玉を置く側を先手の枠、先後を選ぶ側を
+   * 後手の枠とみなす（時計・投了・時間切れの帰属に使う。盤の手番 `turn` は 2 手目で後手になる）
+   */
+  get actingColor(): Color {
+    if (this.mode === 'tenbin' && !this.chosen && !this.pos) return this.phase === 'choose' ? 'gote' : 'sente';
+    return this.turn;
   }
 
   /** 次に指す手が何手目か（1 始まり） */
@@ -215,11 +281,11 @@ export class Game {
   }
 
   /** 棋譜のトークンを1つ適用する。人間の入力・エンジンの手・棋譜の再生はすべてここを通る。 */
-  apply(token: string, time?: MoveTime): MoveRecord {
-    if (this.over) throw new Error('対局は終わっている');
+  apply(token: string, time?: MoveTime, loser?: Color): MoveRecord {
+    if (this.over) throw new Error(t('err_game_over'));
     let rec: MoveRecord;
     if (token.startsWith('choose:')) rec = this.applyChoose(token);
-    else if (token === 'resign' || token === 'timeout') rec = this.applyEnd(token);
+    else if (token === 'resign' || token === 'timeout') rec = this.applyEnd(token, loser);
     else if (this.pos) rec = this.applyNormal(token);
     else rec = this.applyDrop(token);
     if (time) rec.time = time;
@@ -233,34 +299,56 @@ export class Game {
   }
 
   private applyChoose(token: string): MoveRecord {
-    if (this.phase !== 'choose') throw new Error('いまは先後を選ぶ場面ではない');
+    if (this.phase !== 'choose') throw new Error(t('err_not_choose'));
     const c = token.slice('choose:'.length);
-    if (c !== 'sente' && c !== 'gote') throw new Error(`選択の書式が違う: ${token}`);
+    if (c !== 'sente' && c !== 'gote') throw new Error(t('err_choose_format', { token }));
     this.chosen = c;
-    return this.push({ ply: null, color: null, usi: token, text: c === 'sente' ? '先手を持つ' : '後手を持つ', phase: 'choose' });
+    return this.push({
+      ply: null,
+      color: null,
+      usi: token,
+      text: c === 'sente' ? '先手を持つ' : '後手を持つ',
+      textEn: c === 'sente' ? 'Takes Sente' : 'Takes Gote',
+      phase: 'choose',
+    });
   }
 
-  private applyEnd(token: 'resign' | 'timeout'): MoveRecord {
-    const loser = this.turn;
+  private applyEnd(token: 'resign' | 'timeout', given?: Color): MoveRecord {
+    // 投了は押した席の色を受け取る。渡されなければ手番の側（先後が決まる前は
+    // 置く側を先手の枠、選ぶ側を後手の枠として扱う。時計と同じ約束）
+    const loser: Color = given ?? this.actingColor;
     const phase = this.phase;
-    const reason = token === 'resign' ? `${colorName(loser)}の投了` : `${colorName(loser)}の時間切れ`;
-    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason };
-    return this.push({ ply: this.nextPly, color: loser, usi: token, text: token === 'resign' ? '投了' : '切れ負け', phase });
+    this.over = { winner: loser === 'sente' ? 'gote' : 'sente', reason: { kind: token, loser } };
+    return this.push({
+      ply: this.nextPly,
+      color: loser,
+      usi: token,
+      text: token === 'resign' ? '投了' : '切れ負け',
+      textEn: token === 'resign' ? 'Resigns' : 'Time forfeit',
+      phase,
+    });
   }
 
   private applyDrop(token: string): MoveRecord {
     const phase = this.phase;
-    if (phase === 'choose') throw new Error('先に先手か後手かを選ぶ');
+    if (phase === 'choose') throw new Error(t('err_choose_first'));
     const color = this.turn;
     const ply = this.nextPly;
     const found = this.legalDrops().find((d) => d.usi === token);
-    if (!found) throw new Error(`合法な駒打ちではない: ${token}`);
+    if (!found) throw new Error(t('err_illegal_drop', { token }));
     this.fuseki.drop(found);
     this.fusekiBoard.set(found.square, { color, role: found.role });
     this.lastSquare = found.square;
     this.lastFrom = null;
     // 布石中は盤上の駒が動けないので「打」は付けない（連盟の表記）
-    const rec = this.push({ ply, color, usi: token, phase, text: `${squareText(found.square)}${ROLE_KANJI[found.role]}` });
+    const rec = this.push({
+      ply,
+      color,
+      usi: token,
+      phase,
+      text: `${squareText(found.square)}${ROLE_KANJI[found.role]}`,
+      textEn: `${USI_OF_ROLE[found.role] ?? found.role}*${squareNumber(found.square)}`,
+    });
     if (this.fuseki.isPlacementDone) this.enterNormal();
     return rec;
   }
@@ -270,11 +358,11 @@ export class Game {
     this.startSfen = sfen;
     if (!this.fuseki.verifyFinalSfen(sfen)) {
       // 41手目の裁定: 手番（先手）が後手玉を取れる。エンジンには渡せない局面なのでここで終わる。
-      this.over = { winner: 'sente', reason: '41手目の裁定（後手玉が先手の利きに当たっている）' };
+      this.over = { winner: 'sente', reason: { kind: 'ruling41' } };
       return;
     }
     const r = parseSfen('standard', sfen, false);
-    if (r.isErr) throw new Error(`41手目の局面を読めない: ${r.error.message}`);
+    if (r.isErr) throw new Error(t('err_read_41', { msg: r.error.message }));
     this.pos = r.value;
   }
 
@@ -296,25 +384,26 @@ export class Game {
   private applyNormal(token: string): MoveRecord {
     const pos = this.pos!;
     const md: MoveOrDrop | undefined = parseUsi(token);
-    if (!md || !pos.isLegal(md)) throw new Error(`合法手ではない: ${token}`);
+    if (!md || !pos.isLegal(md)) throw new Error(t('err_illegal_move', { token }));
     const color = pos.turn;
     const ply = this.nextPly;
     const lastDest = this.lastSquare ? parseSquareName(this.lastSquare) : undefined;
     const text = makeJapaneseMoveOrDrop(pos, md, lastDest) ?? token;
+    const textEn = makeWesternMoveOrDrop(pos, md) ?? token;
     this.lastFrom = 'from' in md ? makeSquareName(md.from) : null;
     this.lastSquare = makeSquareName(md.to);
     pos.play(md);
     this.normalMoves.push(token);
-    const rec = this.push({ ply, color, usi: token, text, phase: 'normal' });
+    const rec = this.push({ ply, color, usi: token, text, textEn, phase: 'normal' });
     if (pos.isEnd()) {
       const o = pos.outcome();
-      this.over = { winner: o?.winner ?? null, reason: o?.result === 'checkmate' ? '詰み' : (o?.result ?? '終局') };
+      this.over = { winner: o?.winner ?? null, reason: o?.result === 'checkmate' ? { kind: 'mate' } : { kind: 'other', result: o?.result ?? '' } };
     }
     return rec;
   }
 
-  /** 読み筋（USI）を符号の列にする。本将棋は局面を進めながら、布石は駒打ちとして読む。 */
-  japanesePv(usis: string[]): string[] {
+  /** 読み筋（USI）を符号の列にする。本将棋は局面を進めながら、布石は駒打ちとして読む。画面の言語に合わせる。 */
+  pvText(usis: string[]): string[] {
     const out: string[] = [];
     if (this.pos) {
       const p = this.pos.clone();
@@ -322,18 +411,26 @@ export class Game {
       for (const u of usis) {
         const md = parseUsi(u);
         if (!md || !p.isLegal(md)) break;
-        out.push(`${colorMark(p.turn)}${makeJapaneseMoveOrDrop(p, md, last) ?? u}`);
+        const one = lang() === 'en' ? makeWesternMoveOrDrop(p, md) : makeJapaneseMoveOrDrop(p, md, last);
+        out.push(`${colorMark(p.turn)}${one ?? u}`);
         p.play(md);
         last = md.to;
       }
       return out;
     }
-    let turn = this.turn;
+    // 共有の wasm は最新の対局へ戻されていることがある（過去の局面の読み筋）ので、手番は自分の記録から数える
+    const played = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout').length;
+    let turn: Color = played % 2 === 0 ? 'sente' : 'gote';
     for (const u of usis) {
       if (u.length < 4 || u[1] !== '*') break;
       const role = ROLE_OF_USI[u[0]!];
       if (!role) break;
-      out.push(`${colorMark(turn)}${squareText(u.slice(2, 4))}${ROLE_KANJI[role]}`);
+      const sq = u.slice(2, 4);
+      out.push(
+        lang() === 'en'
+          ? `${colorMark(turn)}${u[0]}*${squareNumber(sq)}`
+          : `${colorMark(turn)}${squareText(sq)}${ROLE_KANJI[role]}`,
+      );
       turn = turn === 'sente' ? 'gote' : 'sente';
     }
     return out;
@@ -345,6 +442,25 @@ export class Game {
 
   times(): (MoveTime | undefined)[] {
     return this.moves.map((m) => m.time);
+  }
+
+  /**
+   * 時計の枠ごとの消費時間（秒）。巻き戻したときに残り時間を組み直すために使う。
+   * 先後が決まる前は 置く側＝先手の枠・選ぶ側＝後手の枠 で計っており、選ぶ側が
+   * 先手を取ったらその枠ごと入れ替わる（Clock.swap と同じ約束）。
+   */
+  spentSec(): Record<Color, number> {
+    const spent: Record<Color, number> = { sente: 0, gote: 0 };
+    const placer: Color = this.chosen === 'sente' ? 'gote' : 'sente';
+    const chooser: Color = placer === 'sente' ? 'gote' : 'sente';
+    for (const m of this.moves) {
+      const sec = m.time?.elapsed ?? 0;
+      if (sec === 0) continue;
+      if (m.phase === 'kings') spent[placer] += sec;
+      else if (m.phase === 'choose') spent[chooser] += sec;
+      else if (m.color) spent[m.color] += sec;
+    }
+    return spent;
   }
 
   /** 本将棋の手を、直前の局面つきで順に返す。 */
@@ -434,7 +550,7 @@ export class Game {
     for (const m of this.moves) {
       if (m.phase === 'normal' || m.ply === null || m.usi === 'resign' || m.usi === 'timeout') continue;
       const d = this.fuseki.legalDrops().find((x) => x.usi === m.usi);
-      if (!d) throw new Error(`wasm の局面を戻せない: ${m.usi}`);
+      if (!d) throw new Error(t('err_rewind', { usi: m.usi }));
       this.fuseki.drop(d);
     }
   }

@@ -6,7 +6,7 @@
 ## インストール＆セットアップ
 
 1. [Releases](https://github.com/kotenbu135/tenbin-shogi-desktop/releases/latest) から
-   `tenbin-shogi_x.y.z_x64-setup.exe` を落として実行します。
+   `tenbin-shogi-gui_x.y.z_x64-setup.exe` を落として実行します。
 2. 「**Windows によって PC が保護されました**」が出たら「詳細情報」→「実行」。
    有料の署名を付けていないため、初回だけこの画面が出ます。
 3. 初めて開くと「はじめに」が出るので、**「エンジンを自動で入れる」を 1 回押します**。
@@ -36,6 +36,19 @@
 | Ctrl+C | 棋譜を写す |
 | Ctrl+N / Ctrl+O / Ctrl+S | 新しい対局 / 開く / 保存 |
 
+## 表示の言葉（日本語 / English）
+
+画面は日本語と英語のどちらでも出せます。初めて起動したときは端末の言語に合わせ、
+以後はツールバー右の **English / 日本語** のボタンで切り替えます（覚えるので次からその言葉で開きます）。
+切り替えは窓を読み込み直すので、対局中は確かめてから切り替えます。
+
+英語にすると符号も西洋式（`P-76`、`S*45`）になり、盤の段も数字になります。
+**KIF は言葉に関わらず日本語のまま**書き出します（将棋所・ShogiHome で開ける書式のため）。
+
+The interface is available in English. It follows your system language on first launch;
+after that, use the **English / 日本語** button on the right of the toolbar. Game records are
+always written as Japanese KIF so that Shogidokoro and ShogiHome can open them.
+
 ## 更新
 
 起動のたびに新しい版を見に行き、見つかったら知らせます。**承諾したときだけ**入れ替えて再起動します。
@@ -43,7 +56,7 @@
 
 ## アンインストール
 
-Windows の「設定 → アプリ」から「天秤将棋」を消します。
+Windows の「設定 → アプリ」から「天秤将棋GUI」を消します。
 設定と入れたエンジンは `%APPDATA%\com.fusekishogi.tenbin` に残るので、そこも消せば何も残りません。
 設定だけまっさらにしたいときも、このフォルダを消してから起動します。
 

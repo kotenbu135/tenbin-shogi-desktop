@@ -5,6 +5,7 @@
 // 検討の待ち手に対局の指し手が返る（またはその逆）。落ちずに、盤に入る手だけが入れ替わる。
 
 import { invoke } from '@tauri-apps/api/core';
+import { t } from '../i18n.ts';
 import { listen } from '@tauri-apps/api/event';
 import { parseBestmove, parseId, parseInfo, parseOption, type Bestmove, type UsiInfo, type UsiOption } from './parse.ts';
 import { DEFAULT_EVAL, type EvalScale } from './evalscale.ts';
@@ -120,6 +121,14 @@ export class UsiEngine implements Thinker {
   private waiters: Waiter[] = [];
   private onInfo: ((info: UsiInfo) => void) | null = null;
   private chain: Promise<unknown> = Promise.resolve();
+  /** 進行中の起動。重ねて start() されたときに同じものを待たせる */
+  private starting: Promise<void> | null = null;
+  /** 何度目の起動か。自分の起動が既に古くなっていないかを見るために持つ */
+  private startToken = 0;
+  /** process が落ちたか。起動の途中で落ちたときに、応答を待たずに失敗させる */
+  private exited = false;
+  /** 止めたのに応答が無かった探索の数。遅れて届く bestmove をその数だけ捨てる */
+  private stale = 0;
   /** プロセスの識別子。同じ登録を2本立てる（対局の先後）ときは別にする */
   readonly processId: string;
   readonly config: EngineConfig;
@@ -140,24 +149,36 @@ export class UsiEngine implements Thinker {
 
   /** 起動して usiok → 設定 → readyok まで進める。 */
   async start(): Promise<void> {
-    if (!isTauri()) throw new Error('エンジンの起動は Tauri のアプリ内でだけできる（ブラウザのプレビューでは不可）');
+    if (!isTauri()) throw new Error(t('eng_tauri_only'));
+    // 起動中に重ねて呼ばれたら、同じ起動を待つ（先に go() へ進むと「準備できていない」で落ちる）
+    if (this.starting) return this.starting;
     if (this.state !== 'stopped') return;
     this.setState('starting');
-    try {
-      await this.spawn();
-      this.send('usi');
-      await this.waitFor((l) => l === 'usiok', 15000);
-      this.applyOptions();
-      this.send('isready');
-      await this.waitFor((l) => l === 'readyok', 120000);
-      this.setState('ready');
-    } catch (e) {
-      await this.quit();
-      throw e;
-    }
+    const token = ++this.startToken;
+    this.starting = (async () => {
+      try {
+        await this.spawn();
+        this.send('usi');
+        await this.waitFor((l) => l === 'usiok', 15000);
+        this.applyOptions();
+        this.send('isready');
+        await this.waitFor((l) => l === 'readyok', 120000);
+        this.setState('ready');
+      } catch (e) {
+        // 既に次の起動が始まっていたら、そちらの process を巻き添えに殺さない
+        if (this.startToken === token) await this.quit();
+        throw e;
+      } finally {
+        // 自分の起動だけを片づける。既に次の起動が入っていたらそちらを消さない
+        if (this.startToken === token) this.starting = null;
+      }
+    })();
+    return this.starting;
   }
 
   private async spawn(): Promise<void> {
+    this.exited = false;
+    this.stale = 0;
     await ensureListener();
     receivers.set(this.processId, (p) => this.receive(p));
     await invoke('engine_start', {
@@ -166,7 +187,7 @@ export class UsiEngine implements Thinker {
       args: (this.config.args ?? '').split(/\s+/).filter(Boolean),
       cwd: this.config.cwd || null,
     });
-    this.log('sys', `起動: ${this.config.path}`);
+    this.log('sys', t('eng_started', { path: this.config.path }));
     this.options = [];
   }
 
@@ -196,9 +217,11 @@ export class UsiEngine implements Thinker {
 
   private receive(p: EnginePayload): void {
     if (p.kind === 'exit') {
-      this.log('sys', '終了した');
+      this.log('sys', t('eng_exited_log'));
       this.expecting = false;
-      this.failWaiters(new Error('エンジンが終了した'));
+      this.exited = true;
+      this.starting = null; // 落ちた起動を掴ませない（次の start() は新しく立ち上げる）
+      this.failWaiters(new Error(t('eng_exited')));
       receivers.delete(this.processId);
       this.setState('stopped');
       return;
@@ -221,10 +244,17 @@ export class UsiEngine implements Thinker {
       }
     }
     if (line.startsWith('bestmove')) {
+      // 止めたのに応答しなかった探索の bestmove は、次の go を走らせたあとで届くことがある。
+      // expecting は立て直されているので、捨てる分をここで数えておく
+      if (this.stale > 0) {
+        this.stale--;
+        this.log('sys', t('eng_stale_bestmove', { line }));
+        return;
+      }
       // 走らせていないのに来た bestmove は捨てる。止めたあとのエンジンが余分に返すことがあり、
       // それを次の go の答えとして拾うと、1 手前の局面の手を指してしまう
       if (!this.expecting) {
-        this.log('sys', `余計な bestmove を捨てた: ${line}`);
+        this.log('sys', t('eng_extra_bestmove', { line }));
         return;
       }
       this.expecting = false;
@@ -249,6 +279,8 @@ export class UsiEngine implements Thinker {
   }
 
   private waitFor(match: (line: string) => boolean, timeoutMs: number): Promise<string> {
+    // 起動の途中で process が落ちたときは待たない（15 秒待っても何も来ない）
+    if (this.exited) return Promise.reject(new Error(t('eng_exited')));
     return new Promise((resolve, reject) => {
       const w: Waiter = {
         match,
@@ -256,7 +288,7 @@ export class UsiEngine implements Thinker {
         reject,
         timer: setTimeout(() => {
           this.waiters.splice(this.waiters.indexOf(w), 1);
-          reject(new Error(`エンジンが ${timeoutMs / 1000} 秒応答しない`));
+          reject(new Error(t('eng_no_response', { sec: timeoutMs / 1000 })));
         }, timeoutMs),
       };
       this.waiters.push(w);
@@ -279,7 +311,7 @@ export class UsiEngine implements Thinker {
    * `positionCmd` は "position sfen ..." または "position fuseki moves ..." の完全な行。
    */
   async goInfinite(positionCmd: string, onInfo: (info: UsiInfo) => void): Promise<void> {
-    if (this.state === 'stopped' || this.state === 'starting') throw new Error('エンジンが準備できていない');
+    if (this.state === 'stopped' || this.state === 'starting') throw new Error(t('eng_not_ready'));
     await this.stop();
     this.onInfo = onInfo;
     this.setState('thinking');
@@ -290,7 +322,7 @@ export class UsiEngine implements Thinker {
 
   /** 1手指させて bestmove を待つ。途中で stop() されたときも、そのとき返った bestmove で解決する。 */
   async go(positionCmd: string, goArgs: string, onInfo?: (info: UsiInfo) => void): Promise<Bestmove> {
-    if (this.state === 'stopped' || this.state === 'starting') throw new Error('エンジンが準備できていない');
+    if (this.state === 'stopped' || this.state === 'starting') throw new Error(t('eng_not_ready'));
     await this.stop();
     this.onInfo = onInfo ?? null;
     this.setState('thinking');
@@ -301,7 +333,7 @@ export class UsiEngine implements Thinker {
     try {
       const line = await p;
       const bm = parseBestmove(line);
-      if (!bm) throw new Error(`bestmove を読めない: ${line}`);
+      if (!bm) throw new Error(t('eng_bad_bestmove', { line }));
       return bm;
     } finally {
       this.onInfo = null;
@@ -320,7 +352,11 @@ export class UsiEngine implements Thinker {
       try {
         await p;
       } catch {
-        // 応答しないエンジンは次の go で上書きされる。ここで落とさない。
+        // 応答しないエンジンの bestmove は、遅れて届いても次の go の答えとして拾わない。
+        // 待っていた go() は失敗させる（黙って前の局面の手を返すよりよい）
+        this.expecting = false;
+        this.stale++;
+        this.failWaiters(new Error(t('eng_stop_ignored')));
       }
       if (this.state === 'thinking') this.setState('ready');
     };
@@ -332,8 +368,9 @@ export class UsiEngine implements Thinker {
   async quit(): Promise<void> {
     this.onInfo = null;
     this.expecting = false;
+    this.starting = null;
     receivers.delete(this.processId);
-    this.failWaiters(new Error('エンジンを止めた'));
+    this.failWaiters(new Error(t('eng_killed')));
     if (isTauri()) {
       try {
         await invoke('engine_stop', { id: this.processId });

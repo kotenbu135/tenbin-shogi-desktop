@@ -1,6 +1,7 @@
 // 設定の保存。Tauri では plugin-store（アプリのデータフォルダの settings.json）、
 // ブラウザのプレビューでは localStorage に落とす。中身の形は同じ。
 
+import { detectLang, type Lang } from './i18n.ts';
 import { isTauri, type EngineConfig } from './usi/engine.ts';
 import { DEFAULT_EVAL, type EvalScale } from './usi/evalscale.ts';
 import type { UsiOption } from './usi/parse.ts';
@@ -11,6 +12,8 @@ export const BUILTIN_ID = 'builtin';
 export interface Settings {
   engines: EngineConfig[];
   theme: 'system' | 'light' | 'dark';
+  /** 画面の言葉。既定は端末の言語（日本語以外は英語） */
+  lang: Lang;
   /** 41 手目以降の既定エンジン。未設定なら最初の本将棋エンジン */
   normalEngineId?: string;
   /** 布石の既定。内蔵か、布石対応のエンジン id */
@@ -72,6 +75,7 @@ export function defaultSettings(): Settings {
     engines: [],
     // 明るい地を既定にする（盤と駒が明るいので、周りも明るいほうが目に馴染む）
     theme: 'light',
+    lang: detectLang(),
     fusekiEngineId: BUILTIN_ID,
     analysisMultiPv: 3,
     playMultiPv: 3,
@@ -141,6 +145,9 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     ...d,
     // 'system' は古い既定。明るい地を既定にしたので明るいほうへ寄せる
     theme: saved.theme === 'dark' ? 'dark' : 'light',
+    // 覚えた言語（日本語・英語の2つだけ）。前の版の設定には lang が無いので、
+    // そのときは日本語のまま（端末の言語で勝手に英語へ変えない。初回だけ defaultSettings が端末に合わせる）
+    lang: saved.lang === 'en' ? 'en' : 'ja',
     engines,
     normalEngineId: saved.normalEngineId ?? saved.analysisEngineId,
     fusekiEngineId: saved.fusekiEngineId ?? d.fusekiEngineId,
@@ -204,18 +211,45 @@ function mergeLayout(raw: (Partial<LayoutSettings> & { tab?: string }) | undefin
   };
 }
 
+/** 設定を読めなかったときの理由。立っている間は既定値で動いており、保存すると前の設定を潰す */
+export let settingsLoadError: string | null = null;
+
 export async function loadSettings(): Promise<Settings> {
+  settingsLoadError = null;
   try {
     const s = await getStore();
     if (s) return merge(await s.get<Partial<Settings>>(KEY));
     const raw = localStorage.getItem(KEY);
     return merge(raw ? (JSON.parse(raw) as Partial<Settings>) : null);
-  } catch {
+  } catch (e) {
+    settingsLoadError = e instanceof Error ? e.message : String(e);
     return defaultSettings();
   }
 }
 
+/**
+ * 読めなかった設定を、上書きする前に `<KEY>.bak` へ退避する。1 度だけ動く。
+ * 警告だけでは防げない（欄の幅を動かす・地の色を変えるだけでも保存は走る）。
+ */
+async function backupUnreadable(): Promise<void> {
+  if (settingsLoadError === null) return;
+  settingsLoadError = null; // 退避は 1 度でよい。失敗しても保存自体は続ける
+  try {
+    const s = await getStore();
+    if (s) {
+      const raw = await s.get<unknown>(KEY);
+      if (raw !== undefined && raw !== null) await s.set(`${KEY}.bak`, raw);
+    } else {
+      const raw = localStorage.getItem(KEY);
+      if (raw !== null) localStorage.setItem(`${KEY}.bak`, raw);
+    }
+  } catch {
+    // 退避できなくても保存は続ける（読めない設定はどのみち使えていない）
+  }
+}
+
 export async function saveSettings(settings: Settings): Promise<void> {
+  await backupUnreadable();
   const s = await getStore();
   if (s) {
     await s.set(KEY, settings);

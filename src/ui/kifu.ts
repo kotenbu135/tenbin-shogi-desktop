@@ -3,14 +3,15 @@
 // 消費時間があれば「この手 / 累計」を右に出す（ShogiHome と同じ見せ方）。
 
 import type { MoveRecord, Phase } from '../state/game.ts';
-import { colorMark } from '../state/game.ts';
+import { colorMark, moveText } from '../state/game.ts';
+import { t, type Key } from '../i18n.ts';
 
-const PHASE_LABEL: Record<Phase, string> = {
-  kings: '両玉',
-  choose: '先後の選択',
-  fuseki: '布石',
-  normal: '本将棋',
-  over: '終局',
+const PHASE_KEY: Record<Phase, Key> = {
+  kings: 'phase_kings',
+  choose: 'phase_choose',
+  fuseki: 'phase_fuseki',
+  normal: 'phase_normal',
+  over: 'phase_over',
 };
 
 export interface KifuDeps {
@@ -38,12 +39,12 @@ export class KifuList {
   constructor(private readonly root: HTMLElement, private readonly deps: KifuDeps) {
     root.innerHTML = `
       <div class="kifu-head">
-        <span class="kifu-title">棋譜</span>
+        <span class="kifu-title">${t('kifu_title')}</span>
         <div class="kifu-nav">
-          <button type="button" data-seek="first" title="最初へ (Home)" aria-label="最初へ">${ICON.first}</button>
-          <button type="button" data-seek="prev" title="1手戻る (←)" aria-label="1手戻る">${ICON.prev}</button>
-          <button type="button" data-seek="next" title="1手進む (→)" aria-label="1手進む">${ICON.next}</button>
-          <button type="button" data-seek="last" title="最後へ (End)" aria-label="最後へ">${ICON.last}</button>
+          <button type="button" data-seek="first" title="${t('kifu_first')} (Home)" aria-label="${t('kifu_first')}">${ICON.first}</button>
+          <button type="button" data-seek="prev" title="${t('kifu_prev')} (←)" aria-label="${t('kifu_prev')}">${ICON.prev}</button>
+          <button type="button" data-seek="next" title="${t('kifu_next')} (→)" aria-label="${t('kifu_next')}">${ICON.next}</button>
+          <button type="button" data-seek="last" title="${t('kifu_last')} (End)" aria-label="${t('kifu_last')}">${ICON.last}</button>
         </div>
       </div>
       <ol class="kifu-list"></ol>
@@ -89,7 +90,8 @@ export class KifuList {
     const frag = document.createDocumentFragment();
     const start = document.createElement('li');
     start.className = 'kifu-move start' + (cur === 0 ? ' current' : '');
-    start.innerHTML = `<span class="n"></span><span class="t">開始局面</span>`;
+    start.innerHTML = `<span class="n"></span><span class="t"></span>`;
+    start.querySelector('.t')!.textContent = t('kifu_start_pos');
     start.addEventListener('click', () => this.deps.onSeek(n === 0 ? null : 0));
     frag.appendChild(start);
     let last: Phase | null = null;
@@ -97,7 +99,7 @@ export class KifuList {
       if (m.phase !== last) {
         const li = document.createElement('li');
         li.className = 'kifu-phase';
-        li.textContent = PHASE_LABEL[m.phase];
+        li.textContent = t(PHASE_KEY[m.phase]);
         frag.appendChild(li);
         last = m.phase;
       }
@@ -107,17 +109,17 @@ export class KifuList {
       const num = document.createElement('span');
       num.className = 'n';
       num.textContent = m.ply === null ? '' : String(m.ply);
-      const t = document.createElement('span');
-      t.className = 't';
+      const txt = document.createElement('span');
+      txt.className = 't';
       if (m.color) {
         const mk = document.createElement('span');
         mk.className = `mk ${m.color}`;
         mk.textContent = colorMark(m.color);
-        t.append(mk, m.text);
+        txt.append(mk, moveText(m));
       } else {
-        t.textContent = m.text;
+        txt.textContent = moveText(m);
       }
-      li.append(num, t);
+      li.append(num, txt);
       if (withTime) {
         const tm = document.createElement('span');
         tm.className = 'tm';

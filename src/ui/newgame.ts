@@ -4,6 +4,7 @@
 // エンジンの席は、本将棋（41 手目から）に使う USI エンジンと、布石（40 手）に使うもの（内蔵の方策か
 // 布石対応のエンジン）を別々に選ぶ。強さは公開サイトのレベルと同じ温度の刻み。
 
+import { t } from '../i18n.ts';
 import type { Mode } from '../state/game.ts';
 import type { TimeControl } from '../state/clock.ts';
 import { BUILTIN_ID, type Settings } from '../settings.ts';
@@ -34,18 +35,26 @@ export interface NewGameChoice {
 }
 
 /** 内蔵の方策のレベル。公開サイトの LEVELS と同じ温度。5 は価値ネットで K=8 の最善 */
-export const LEVELS: { level: number; label: string; temperature: number; search: number }[] = [
-  { level: 1, label: '1 · 気まぐれ', temperature: 1.0, search: 1 },
-  { level: 2, label: '2', temperature: 0.8, search: 1 },
-  { level: 3, label: '3', temperature: 0.6, search: 1 },
-  { level: 4, label: '4', temperature: 0.4, search: 1 },
-  { level: 5, label: '5', temperature: 0.4, search: 8 },
+export const LEVELS: { level: number; temperature: number; search: number }[] = [
+  { level: 1, temperature: 1.0, search: 1 },
+  { level: 2, temperature: 0.8, search: 1 },
+  { level: 3, temperature: 0.6, search: 1 },
+  { level: 4, temperature: 0.4, search: 1 },
+  { level: 5, temperature: 0.4, search: 8 },
 ];
+
+/** 選び札に出す名前。1 だけ言葉を添える（何が変わるのか分かるように） */
+function levelLabel(level: number): string {
+  return level === 1 ? t('ng_level1') : String(level);
+}
 
 export class NewGameDialog {
   private readonly dialog: HTMLDialogElement;
   private resolve: ((c: NewGameChoice | null) => void) | null = null;
   // 既定は「玉を置く側＝エンジン、先後を選ぶ側＝人」。人はまず選ぶ側を持つほうが分かりやすい
+  // 席ごとに「本将棋は人が指す」を自分で選んだか。エンジンが 1 本も無かった頃に残った
+  // 空文字（既定へ寄せたい）と、選んで入れた空文字（守りたい）を見分けるために持つ
+  private chosePerson: [boolean, boolean] = [false, false];
   private last: NewGameChoice = {
     mode: 'tenbin',
     seats: [{ type: 'engine', normalId: '', fusekiId: BUILTIN_ID, level: 4, secPerMove: 3 }, { type: 'human' }],
@@ -75,70 +84,75 @@ export class NewGameDialog {
     const defNormal = normals.some((e) => e.id === s.normalEngineId) ? s.normalEngineId! : normals[0]?.id ?? '';
     const seat = (i: 0 | 1) => {
       const p = l.seats[i];
-      const base = p.type === 'engine' ? p : { normalId: defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
+      // 席を一度「人」にしても、エンジンへ戻したときに前の「人が指す」を守る
+      const base =
+        p.type === 'engine'
+          ? p
+          : { normalId: this.chosePerson[i] ? '' : defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
       const fusekiIds = [HUMAN_ID, BUILTIN_ID, ...fusekis.map((e) => e.id)];
       const eng = {
         ...base,
-        normalId: normals.some((e) => e.id === base.normalId) ? base.normalId : defNormal,
+        normalId:
+          normals.some((e) => e.id === base.normalId) || (base.normalId === '' && this.chosePerson[i]) ? base.normalId : defNormal,
         // 布石も同じ。消えたエンジンを指したままだと、一覧の先頭（「人が置く」）で固まって見える
         fusekiId: fusekiIds.includes(base.fusekiId) ? base.fusekiId : BUILTIN_ID,
       };
       return `
         <fieldset class="seat" data-seat="${i}">
           <legend class="seat-title"></legend>
-          <label>名前<input name="name${i}" value="${esc(l.names[i])}" /></label>
+          <label>${t('ng_name')}<input name="name${i}" value="${esc(l.names[i])}" /></label>
           <div class="seat-type">
-            <label><input type="radio" name="type${i}" value="human" ${p.type === 'human' ? 'checked' : ''}/> 人</label>
-            <label><input type="radio" name="type${i}" value="engine" ${p.type === 'engine' ? 'checked' : ''}/> エンジン</label>
+            <label><input type="radio" name="type${i}" value="human" ${p.type === 'human' ? 'checked' : ''}/> ${t('ng_human')}</label>
+            <label><input type="radio" name="type${i}" value="engine" ${p.type === 'engine' ? 'checked' : ''}/> ${t('ng_engine')}</label>
           </div>
           <div class="seat-engine" ${p.type === 'engine' ? '' : 'hidden'}>
-            <label><span class="normal-label">本将棋（41手目から）</span><select name="normal${i}">
-              <option value="">人が指す</option>
+            <label><span class="normal-label">${t('ng_normal_label')}</span><select name="normal${i}">
+              <option value="">${t('ng_played_by_person')}</option>
               ${normals.map((e) => `<option value="${e.id}" ${eng.normalId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
-            <label class="fuseki-only">布石（40手）<select name="fuseki${i}">
-              <option value="${HUMAN_ID}" ${eng.fusekiId === HUMAN_ID ? 'selected' : ''}>人が置く</option>
-              <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>内蔵の方策</option>
+            <label class="fuseki-only">${t('ng_fuseki_label')}<select name="fuseki${i}">
+              <option value="${HUMAN_ID}" ${eng.fusekiId === HUMAN_ID ? 'selected' : ''}>${t('ng_placed_by_person')}</option>
+              <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>${t('ng_builtin_policy')}</option>
               ${fusekis.map((e) => `<option value="${e.id}" ${eng.fusekiId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
             <div class="form-row two">
-              <label class="fuseki-only" title="内蔵の方策の温度。1 は気まぐれ、5 は価値ネットで最善を選ぶ">強さ<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${lv.label}</option>`).join('')}</select></label>
-              <label>1手の秒数<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
+              <label class="fuseki-only" title="${t('ng_strength_title')}">${t('ng_strength')}<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${levelLabel(lv.level)}</option>`).join('')}</select></label>
+              <label>${t('ng_sec_per_move')}<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
             </div>
           </div>
         </fieldset>`;
     };
     this.dialog.innerHTML = `
       <form class="dialog-body newgame-form">
-        <div class="dialog-head"><h2>新しい対局</h2></div>
+        <div class="dialog-head"><h2>${t('ng_title')}</h2></div>
         <fieldset class="kind">
-          <legend>ルール</legend>
-          <label><input type="radio" name="mode" value="tenbin" ${l.mode === 'tenbin' ? 'checked' : ''}/> 天秤将棋。一方が両方の玉を置き、もう一方が先後を選ぶ</label>
-          <label><input type="radio" name="mode" value="fuseki" ${l.mode === 'fuseki' ? 'checked' : ''}/> 布石将棋。空の盤に交互に20枚ずつ打ってから指す</label>
-          <label><input type="radio" name="mode" value="position" ${l.mode === 'position' ? 'checked' : ''}/> 本将棋。ふつうの平手の将棋</label>
+          <legend>${t('ng_rule')}</legend>
+          <label><input type="radio" name="mode" value="tenbin" ${l.mode === 'tenbin' ? 'checked' : ''}/> ${t('ng_rule_tenbin')}</label>
+          <label><input type="radio" name="mode" value="fuseki" ${l.mode === 'fuseki' ? 'checked' : ''}/> ${t('ng_rule_fuseki')}</label>
+          <label><input type="radio" name="mode" value="position" ${l.mode === 'position' ? 'checked' : ''}/> ${t('ng_rule_position')}</label>
         </fieldset>
         <div class="seats">${seat(0)}${seat(1)}</div>
         <div class="form-row">
-          <label>持ち時間（分）<input name="main" type="number" min="0" max="600" value="${mainMin}" /></label>
-          <label>秒読み（秒）<input name="byoyomi" type="number" min="0" max="600" value="${byo}" /></label>
-          <span class="hint form-hint">両方 0 なら時間は計らず、エンジンは「1手の秒数」で指す</span>
+          <label>${t('ng_main_min')}<input name="main" type="number" min="0" max="600" value="${mainMin}" /></label>
+          <label>${t('ng_byoyomi_sec')}<input name="byoyomi" type="number" min="0" max="600" value="${byo}" /></label>
+          <span class="hint form-hint">${t('ng_time_hint')}</span>
         </div>
         <div class="dialog-actions">
-          <button type="button" data-act="cancel">やめる</button>
-          <button type="submit" class="primary">対局を始める</button>
+          <button type="button" data-act="cancel">${t('cancel')}</button>
+          <button type="submit" class="primary">${t('ng_start')}</button>
         </div>
       </form>`;
     const form = this.dialog.querySelector('form')!;
     const seatTitles = () => {
       const mode = (form.elements.namedItem('mode') as RadioNodeList).value as Mode;
-      const titles = mode === 'tenbin' ? ['玉を置く', '先後を選ぶ'] : ['先手', '後手'];
+      const titles = mode === 'tenbin' ? [t('role_placer'), t('role_chooser')] : [t('side_sente'), t('side_gote')];
       this.dialog.querySelectorAll('.seat-title').forEach((el, i) => (el.textContent = titles[i]!));
       // 天秤将棋は始める時点で先後が決まっていない。名前の下敷きも役の名で出す
       this.dialog.querySelectorAll<HTMLInputElement>('.seat input[name^="name"]').forEach((el, i) => (el.placeholder = titles[i]!));
       // 本将棋には布石が無い。布石のエンジンと強さは隠す
       const fuseki = mode !== 'position';
       for (const el of this.dialog.querySelectorAll<HTMLElement>('.fuseki-only')) el.hidden = !fuseki;
-      for (const el of this.dialog.querySelectorAll<HTMLElement>('.normal-label')) el.textContent = fuseki ? '本将棋（41手目から）' : '使うエンジン';
+      for (const el of this.dialog.querySelectorAll<HTMLElement>('.normal-label')) el.textContent = t(fuseki ? 'ng_normal_label' : 'ng_engine_label');
     };
     for (const r of form.querySelectorAll<HTMLInputElement>('input[name="mode"]')) r.addEventListener('change', seatTitles);
     seatTitles();
@@ -171,6 +185,12 @@ export class NewGameDialog {
         names: [str('name0'), str('name1')],
         timeControl: main === 0 && byoyomi === 0 ? null : { mainSec: main, byoyomiSec: byoyomi },
       };
+      // エンジンが並んでいる一覧から「人が指す」を選んだのなら、次に開いたときも守る
+      for (const i of [0, 1] as const) {
+        const sp = choice.seats[i];
+        // 席が「人」のときは前の選択を消さない（次にエンジンへ戻したときに要る）
+        if (sp.type === 'engine') this.chosePerson[i] = sp.normalId === '' && normals.length > 0;
+      }
       this.last = choice;
       const r = this.resolve;
       this.resolve = null;

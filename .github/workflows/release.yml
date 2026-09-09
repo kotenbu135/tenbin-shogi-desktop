@@ -40,9 +40,9 @@ jobs:
           # 自動更新が使うのは NSIS のほう
           args: --bundles nsis
           tagName: ${{ github.ref_name }}
-          releaseName: 天秤将棋 __VERSION__
+          releaseName: 天秤将棋GUI __VERSION__
           releaseBody: |
-            天秤将棋 __VERSION__
+            天秤将棋GUI __VERSION__
 
             インストーラ（`*-setup.exe`）を落として実行してください。
             すでに入れている方は、アプリが起動のたびに更新を見に行きます。
@@ -73,15 +73,15 @@ jobs:
             exit 1
           fi
           echo "配布物: $SETUP"
-          NAME="tenbin-shogi_${VERSION}_x64-setup.exe"
+          NAME="tenbin-shogi-gui_${VERSION}_x64-setup.exe"
           cp "$SETUP" "$NAME"
           SIG=$(cat "${SETUP}.sig")
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${NAME}"
-          printf '{\n  "version": "%s",\n  "notes": "天秤将棋 %s",\n  "pub_date": "%s",\n  "platforms": {\n    "windows-x86_64": { "signature": "%s", "url": "%s" }\n  }\n}\n' \
+          printf '{\n  "version": "%s",\n  "notes": "天秤将棋GUI %s",\n  "pub_date": "%s",\n  "platforms": {\n    "windows-x86_64": { "signature": "%s", "url": "%s" }\n  }\n}\n' \
             "$VERSION" "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SIG" "$URL" > latest.json
           cat latest.json
           gh release upload "$TAG" "$NAME" latest.json --clobber -R "$GITHUB_REPOSITORY"
-          # 日本語が落ちて読めない名前になったものは消す
-          for a in $(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -E '^_' || true); do
+          # 日本語が落ちて読めない名前になったものは消す（天秤将棋GUI_… は GUI_… になる）
+          for a in $(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -E '^(_|GUI_)' || true); do
             gh release delete-asset "$TAG" "$a" -y -R "$GITHUB_REPOSITORY"
           done

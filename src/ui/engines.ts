@@ -3,6 +3,7 @@
 // エンジン本体と評価関数はこのアプリに入っていない。
 
 import { invoke } from '@tauri-apps/api/core';
+import { t } from '../i18n.ts';
 import { COMMON_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, type EngineConfig, type EngineKind } from '../usi/engine.ts';
 import { EVAL_PRESETS, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
@@ -52,22 +53,21 @@ export class EngineDialog {
     const d = this.dialog;
     d.innerHTML = `
       <form method="dialog" class="dialog-body">
-        <div class="dialog-head"><h2>エンジン</h2><button type="submit" class="link">閉じる</button></div>
-        <p class="hint">USI 対応のエンジンなら何本でも登録できます。本体と評価関数はこのアプリには入っていません。
-          エンジンのフォルダ <code class="engines-dir">${esc(this.enginesDir ?? '')}</code> に置けばまとめて取り込めます。
-          <button type="button" class="link" data-act="open-dir">フォルダを開く</button></p>
+        <div class="dialog-head"><h2>${t('en_title')}</h2><button type="submit" class="link">${t('close')}</button></div>
+        <p class="hint">${t('en_intro')} <code class="engines-dir">${esc(this.enginesDir ?? '')}</code> ${t('en_intro_tail')}
+          <button type="button" class="link" data-act="open-dir">${t('en_open_dir')}</button></p>
         <ul class="engine-list"></ul>
         <div class="dialog-actions">
-          <button type="button" data-act="log" title="エンジンとのやり取り（USI）をそのまま見る。起動しないときの手がかりになる">USI ログ</button>
-          <button type="button" data-act="import">フォルダから取り込む</button>
-          <button type="button" data-act="add" class="primary">実行ファイルを選んで追加</button>
+          <button type="button" data-act="log" title="${t('en_log_title')}">${t('en_log')}</button>
+          <button type="button" data-act="import">${t('en_import')}</button>
+          <button type="button" data-act="add" class="primary">${t('en_add')}</button>
         </div>
       </form>`;
     const ul = d.querySelector('.engine-list')!;
     if (s.engines.length === 0) {
       const li = document.createElement('li');
       li.className = 'engine-empty';
-      li.textContent = 'まだ登録がありません。布石の評価は内蔵のものが動きますが、41 手目以降の検討と対局にはエンジンが要ります。';
+      li.textContent = t('en_empty');
       ul.appendChild(li);
     }
     const normalDefault = s.engines.find((e) => e.id === s.normalEngineId && e.kind === 'normal') ?? s.engines.find((e) => e.kind === 'normal');
@@ -75,28 +75,29 @@ export class EngineDialog {
       const li = document.createElement('li');
       li.className = 'engine-item';
       const badges: string[] = [];
-      badges.push(`<span class="engine-kind">${e.kind === 'fuseki' ? '布石にも対応' : '本将棋'}</span>`);
-      if (e.kind === 'normal' && normalDefault?.id === e.id) badges.push('<span class="engine-default">本将棋の既定</span>');
-      if (e.kind === 'fuseki' && s.fusekiEngineId === e.id) badges.push('<span class="engine-default">布石の既定</span>');
+      badges.push(`<span class="engine-kind">${t(e.kind === 'fuseki' ? 'en_kind_fuseki' : 'en_kind_normal')}</span>`);
+      if (e.kind === 'normal' && normalDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_normal')}</span>`);
+      if (e.kind === 'fuseki' && s.fusekiEngineId === e.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
       const opts = ['Threads', 'USI_Hash', 'EvalDir'].map((k) => {
         const v = optionValue(e, k);
-        return v ? `${k === 'USI_Hash' ? 'ハッシュ' : k === 'Threads' ? 'スレッド' : '評価関数'} ${esc(v)}${k === 'USI_Hash' ? 'MB' : ''}` : '';
+        const label = t(k === 'USI_Hash' ? 'en_opt_hash' : k === 'Threads' ? 'en_opt_threads' : 'en_opt_eval');
+        return v ? `${label} ${esc(v)}${k === 'USI_Hash' ? 'MB' : ''}` : '';
       }).filter(Boolean);
       li.innerHTML = `
-        <div class="engine-name">${esc(e.name || '(名前なし)')} ${badges.join(' ')}${e.idName ? `<span class="engine-idname">${esc(e.idName)}</span>` : ''}</div>
+        <div class="engine-name">${esc(e.name || t('en_noname'))} ${badges.join(' ')}${e.idName ? `<span class="engine-idname">${esc(e.idName)}</span>` : ''}</div>
         <div class="engine-path">${esc(e.path)}${e.args ? ' ' + esc(e.args) : ''}</div>
-        <div class="engine-meta">${opts.join(' · ')}${opts.length ? ' · ' : ''}勝率の目盛り ${e.eval.scale} / ${e.eval.offsetCp >= 0 ? '+' : ''}${e.eval.offsetCp}</div>
+        <div class="engine-meta">${opts.join(' · ')}${opts.length ? ' · ' : ''}${t('en_scale_meta', { scale: e.eval.scale, offset: `${e.eval.offsetCp >= 0 ? '+' : ''}${e.eval.offsetCp}` })}</div>
         <div class="engine-actions">
-          <button type="button" data-act="edit">設定</button>
-          <button type="button" data-act="dup">複製</button>
-          <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : s.fusekiEngineId === e.id) ? 'disabled' : ''}>${e.kind === 'fuseki' ? '布石の既定にする' : '本将棋の既定にする'}</button>
-          <button type="button" data-act="remove" class="danger">削除</button>
+          <button type="button" data-act="edit">${t('en_edit')}</button>
+          <button type="button" data-act="dup">${t('en_dup')}</button>
+          <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : s.fusekiEngineId === e.id) ? 'disabled' : ''}>${t(e.kind === 'fuseki' ? 'en_make_default_fuseki' : 'en_make_default_normal')}</button>
+          <button type="button" data-act="remove" class="danger">${t('en_remove')}</button>
         </div>`;
       li.querySelector('[data-act="edit"]')!.addEventListener('click', () => this.paintForm(clone(e)));
       li.querySelector('[data-act="dup"]')!.addEventListener('click', () => {
         const c = clone(e);
         c.id = newEngineConfig().id;
-        c.name = (e.name || 'エンジン') + '（複製）';
+        c.name = t('en_dup_suffix', { name: e.name || t('engine_word') });
         this.paintForm(c);
       });
       li.querySelector('[data-act="default"]')!.addEventListener('click', () => {
@@ -105,7 +106,7 @@ export class EngineDialog {
         void this.persist();
       });
       li.querySelector('[data-act="remove"]')!.addEventListener('click', () => {
-        if (!confirm(`「${e.name || e.path}」を削除しますか`)) return;
+        if (!confirm(t('en_remove_confirm', { name: e.name || e.path }))) return;
         s.engines = s.engines.filter((x) => x.id !== e.id);
         if (s.normalEngineId === e.id) s.normalEngineId = undefined;
         if (s.fusekiEngineId === e.id) s.fusekiEngineId = BUILTIN_ID;
@@ -132,7 +133,7 @@ export class EngineDialog {
   }
 
   private busy(text: string): void {
-    this.dialog.innerHTML = `<div class="dialog-body"><div class="dialog-head"><h2>エンジン</h2></div><p class="hint">${esc(text)}</p></div>`;
+    this.dialog.innerHTML = `<div class="dialog-body"><div class="dialog-head"><h2>${t('en_title')}</h2></div><p class="hint">${esc(text)}</p></div>`;
   }
 
   /** 取り込んだばかりのエンジンを登録して、本将棋の既定にする */
@@ -161,7 +162,7 @@ export class EngineDialog {
       return;
     }
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const r = await open({ multiple: false, directory: false, title: 'エンジンの実行ファイル' });
+    const r = await open({ multiple: false, directory: false, title: t('en_pick_exe') });
     if (typeof r !== 'string') return;
     const cfg = newEngineConfig();
     cfg.path = r;
@@ -171,7 +172,7 @@ export class EngineDialog {
 
   /** `usi` で申告を読み、名前・種別・目盛りを埋める。失敗しても登録は続けられる（申告なしで） */
   private async probeInto(cfg: EngineConfig, proposeName: boolean): Promise<string | null> {
-    this.busy(`${basename(cfg.path)} を起動して申告を読んでいます…`);
+    this.busy(t('en_probing', { name: basename(cfg.path) }));
     try {
       const r = await UsiEngine.probe({ path: cfg.path, args: cfg.args, cwd: cfg.cwd }, (dir, text) => this.deps.onLog(basename(cfg.path), dir, text));
       cfg.idName = r.idName;
@@ -202,7 +203,7 @@ export class EngineDialog {
       return;
     }
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const picked = await open({ multiple: false, directory: true, defaultPath: dir, title: 'エンジンを置いたフォルダ' });
+    const picked = await open({ multiple: false, directory: true, defaultPath: dir, title: t('en_pick_dir') });
     if (typeof picked !== 'string') return;
     let found: FoundExecutable[];
     try {
@@ -217,12 +218,12 @@ export class EngineDialog {
     const d = this.dialog;
     d.innerHTML = `
       <form class="dialog-body">
-        <div class="dialog-head"><h2>フォルダから取り込む</h2></div>
-        <p class="hint">${esc(picked)} の下 2 段までの実行ファイル。${candidates.length === 0 ? '新しく取り込めるものはありません。' : '取り込むものを選んでください。1 本ずつ起動して申告を読みます。'}</p>
+        <div class="dialog-head"><h2>${t('en_import_title')}</h2></div>
+        <p class="hint">${t('en_import_hint', { dir: esc(picked) })}${t(candidates.length === 0 ? 'en_import_none' : 'en_import_pick')}</p>
         <ul class="import-list">${candidates.map((f, i) => `<li><label><input type="checkbox" name="pick" value="${i}" ${/yaneuraou|suisho|shogi|usi|engine/i.test(f.name) ? 'checked' : ''}/> <span class="import-name">${esc(f.name)}</span> <span class="engine-path">${esc(f.path)}</span></label></li>`).join('')}</ul>
         <div class="dialog-actions">
-          <button type="button" data-act="cancel">やめる</button>
-          <button type="submit" class="primary" ${candidates.length === 0 ? 'disabled' : ''}>取り込む</button>
+          <button type="button" data-act="cancel">${t('cancel')}</button>
+          <button type="submit" class="primary" ${candidates.length === 0 ? 'disabled' : ''}>${t('en_import_do')}</button>
         </div>
       </form>`;
     d.querySelector('[data-act="cancel"]')!.addEventListener('click', () => this.paintList());
@@ -241,7 +242,7 @@ export class EngineDialog {
       await this.deps.save();
       this.deps.onChanged();
       this.paintList();
-      if (errors.length) alert('起動できなかったものがあります（登録していません）:\n' + errors.join('\n'));
+      if (errors.length) alert(t('en_import_errors', { list: errors.join('\n') }));
     });
   }
 
@@ -257,47 +258,47 @@ export class EngineDialog {
     const optText = Object.entries(cfg.options).filter(([k]) => !declared.some((o) => o.name === k)).map(([k, v]) => `${k}=${v}`).join('\n');
     d.innerHTML = `
       <form class="dialog-body engine-form">
-        <div class="dialog-head"><h2>${isNew ? 'エンジンを追加' : 'エンジンの設定'}</h2>${cfg.idName ? `<span class="engine-idname">${esc(cfg.idName)}${cfg.idAuthor ? ' · ' + esc(cfg.idAuthor) : ''}</span>` : ''}</div>
+        <div class="dialog-head"><h2>${t(isNew ? 'en_form_new' : 'en_form_edit')}</h2>${cfg.idName ? `<span class="engine-idname">${esc(cfg.idName)}${cfg.idAuthor ? ' · ' + esc(cfg.idAuthor) : ''}</span>` : ''}</div>
         <div class="form-row two">
-          <label>名前<input name="name" value="${esc(cfg.name)}" placeholder="例: 水匠5" required /></label>
+          <label>${t('en_name')}<input name="name" value="${esc(cfg.name)}" placeholder="${t('en_name_placeholder')}" required /></label>
           <fieldset class="kind inline">
-            <legend>使える局面</legend>
-            <label><input type="radio" name="kind" value="normal" ${cfg.kind === 'normal' ? 'checked' : ''} /> 本将棋（41手目以降）</label>
-            <label><input type="radio" name="kind" value="fuseki" ${cfg.kind === 'fuseki' ? 'checked' : ''} /> 布石にも対応</label>
+            <legend>${t('en_kind_legend')}</legend>
+            <label><input type="radio" name="kind" value="normal" ${cfg.kind === 'normal' ? 'checked' : ''} /> ${t('en_kind_normal_label')}</label>
+            <label><input type="radio" name="kind" value="fuseki" ${cfg.kind === 'fuseki' ? 'checked' : ''} /> ${t('en_kind_fuseki')}</label>
           </fieldset>
         </div>
-        <label>実行ファイル
-          <span class="path-row"><input name="path" value="${esc(cfg.path)}" placeholder="例: C:\\shogi\\YaneuraOu.exe" required /><button type="button" data-pick="path">参照…</button><button type="button" data-act="reprobe" title="起動して申告を読み直す">申告を読む</button></span>
+        <label>${t('en_exe')}
+          <span class="path-row"><input name="path" value="${esc(cfg.path)}" placeholder="${t('en_exe_placeholder')}" required /><button type="button" data-pick="path">${t('en_browse')}</button><button type="button" data-act="reprobe" title="${t('en_reprobe_title')}">${t('en_reprobe')}</button></span>
         </label>
         <details class="engine-advanced">
-          <summary>起動の細かい設定</summary>
-          <label>起動時の引数（ふつうは空。例: wsl.exe 経由なら <code>-d Ubuntu-24.04 -- /home/you/engine</code>）
+          <summary>${t('en_advanced')}</summary>
+          <label>${t('en_args')}
             <input name="args" value="${esc(cfg.args ?? '')}" spellcheck="false" />
           </label>
-          <label>作業フォルダ（空なら実行ファイルの場所）
-            <span class="path-row"><input name="cwd" value="${esc(cfg.cwd ?? '')}" /><button type="button" data-pick="cwd">参照…</button></span>
+          <label>${t('en_cwd')}
+            <span class="path-row"><input name="cwd" value="${esc(cfg.cwd ?? '')}" /><button type="button" data-pick="cwd">${t('en_browse')}</button></span>
           </label>
         </details>
         <fieldset class="eval-scale">
-          <legend>評価値から勝率への目盛り</legend>
+          <legend>${t('en_eval_legend')}</legend>
           <div class="form-row">
-            <label>型<select name="preset">
-              ${EVAL_PRESETS.map((p) => `<option value="${p.id}" ${preset?.id === p.id ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
-              <option value="custom" ${preset ? '' : 'selected'}>手で指定</option>
+            <label>${t('en_preset')}<select name="preset">
+              ${EVAL_PRESETS.map((p) => `<option value="${p.id}" ${preset?.id === p.id ? 'selected' : ''}>${esc(t(p.labelKey))}</option>`).join('')}
+              <option value="custom" ${preset ? '' : 'selected'}>${t('en_preset_custom')}</option>
             </select></label>
-            <label>S（幅）<input name="scale" type="number" min="1" max="10000" value="${cfg.eval.scale}" /></label>
-            <label>offset（50% の cp）<input name="offset" type="number" min="-5000" max="5000" value="${cfg.eval.offsetCp}" /></label>
+            <label>${t('en_scale_s')}<input name="scale" type="number" min="1" max="10000" value="${cfg.eval.scale}" /></label>
+            <label>${t('en_scale_offset')}<input name="offset" type="number" min="-5000" max="5000" value="${cfg.eval.offsetCp}" /></label>
           </div>
-          <p class="hint eval-note">${esc(preset?.note ?? 'p = 1 / (1 + exp(−(cp − offset) / S))。エンジンの目盛りに合わせて決める')}</p>
+          <p class="hint eval-note">${esc(preset ? t(preset.noteKey) : t('eval_note_default'))}</p>
         </fieldset>
         <fieldset class="usi-options">
-          <legend>エンジンの設定（申告どおり）</legend>
-          ${declared.length ? `<div class="option-grid">${optionRows}</div>` : '<p class="hint">申告を読んでいません。「申告を読む」で起動して読むと、ここに項目が並びます。</p>'}
-          <label>申告に無い setoption（1行に name=value）<textarea name="extra" rows="2" spellcheck="false">${esc(optText)}</textarea></label>
+          <legend>${t('en_usi_legend')}</legend>
+          ${declared.length ? `<div class="option-grid">${optionRows}</div>` : `<p class="hint">${t('en_no_declaration')}</p>`}
+          <label>${t('en_extra_setoption')}<textarea name="extra" rows="2" spellcheck="false">${esc(optText)}</textarea></label>
         </fieldset>
         <div class="dialog-actions">
-          <button type="button" data-act="cancel">やめる</button>
-          <button type="submit" class="primary">保存</button>
+          <button type="button" data-act="cancel">${t('cancel')}</button>
+          <button type="submit" class="primary">${t('en_save')}</button>
         </div>
       </form>`;
     const form = d.querySelector('form')!;
@@ -310,7 +311,7 @@ export class EngineDialog {
     reprobe.addEventListener('click', async () => {
       this.readForm(form, cfg);
       const err = await this.probeInto(cfg, !cfg.name);
-      if (err) alert(`申告を読めない: ${err}`);
+      if (err) alert(t('en_probe_failed', { msg: err }));
       this.paintForm(cfg);
     });
     const presetSel = form.elements.namedItem('preset') as HTMLSelectElement;
@@ -319,7 +320,7 @@ export class EngineDialog {
       if (!p) return;
       (form.elements.namedItem('scale') as HTMLInputElement).value = String(p.eval.scale);
       (form.elements.namedItem('offset') as HTMLInputElement).value = String(p.eval.offsetCp);
-      d.querySelector('.eval-note')!.textContent = p.note;
+      d.querySelector('.eval-note')!.textContent = t(p.noteKey);
     });
     for (const name of ['scale', 'offset']) {
       (form.elements.namedItem(name) as HTMLInputElement).addEventListener('input', () => {
@@ -348,7 +349,7 @@ export class EngineDialog {
 
   private async pick(field: string, form: HTMLFormElement, directory = field === 'cwd'): Promise<void> {
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const r = await open({ multiple: false, directory, title: directory ? 'フォルダ' : 'ファイル' });
+    const r = await open({ multiple: false, directory, title: t(directory ? 'en_pick_folder' : 'en_pick_file') });
     if (typeof r !== 'string') return;
     const el = form.elements.namedItem(field) as HTMLInputElement | null;
     if (el) el.value = r;
@@ -418,16 +419,16 @@ function optionRow(o: UsiOption, override: string | undefined): string {
       control = `<select name="${esc(id)}">${(o.vars ?? [cur]).map((v) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`;
       break;
     case 'button':
-      control = `<span class="hint">（実行の項目。ここでは設定できません）</span>`;
+      control = `<span class="hint">${t('en_opt_button')}</span>`;
       break;
     default: {
       const pathLike = /(Dir|File|Path)$/i.test(o.name) || o.type === 'filename';
       const dir = /Dir$/i.test(o.name);
-      control = `<span class="path-row"><input type="text" name="${esc(id)}" value="${esc(cur)}" spellcheck="false" />${pathLike && isTauri() ? `<button type="button" data-opt-pick="${esc(id)}" data-opt-dir="${dir ? 1 : 0}">参照…</button>` : ''}</span>`;
+      control = `<span class="path-row"><input type="text" name="${esc(id)}" value="${esc(cur)}" spellcheck="false" />${pathLike && isTauri() ? `<button type="button" data-opt-pick="${esc(id)}" data-opt-dir="${dir ? 1 : 0}">${t('en_browse')}</button>` : ''}</span>`;
     }
   }
   const range = o.type === 'spin' && (o.min !== undefined || o.max !== undefined) ? `<span class="opt-range">${o.min ?? ''}〜${o.max ?? ''}</span>` : '';
-  return `<div class="opt-row ${changed ? 'changed' : ''}"><label class="opt-name" for="${esc(id)}">${esc(o.name)}</label><div class="opt-control">${control}${range}</div><button type="button" class="link opt-reset" data-opt-reset="${esc(o.name)}" title="申告の既定値 ${esc(o.default ?? '')} に戻す">既定</button></div>`;
+  return `<div class="opt-row ${changed ? 'changed' : ''}"><label class="opt-name" for="${esc(id)}">${esc(o.name)}</label><div class="opt-control">${control}${range}</div><button type="button" class="link opt-reset" data-opt-reset="${esc(o.name)}" title="${t('en_opt_reset_title', { value: esc(o.default ?? '') })}">${t('en_opt_reset')}</button></div>`;
 }
 
 function clone(e: EngineConfig): EngineConfig {

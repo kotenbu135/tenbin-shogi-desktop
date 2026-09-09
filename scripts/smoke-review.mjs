@@ -31,7 +31,7 @@ console.log('はじめての起動:', await page.evaluate(() => {
   return `案内が出た · 高さ ${Math.round(body)}px（1 画面に収まる） · 操作 ${acts} · テーマ ${theme}`;
 }));
 // 古い形の設定（タブ 1 枚を覚えるだけ）から読み直せるか。実機の settings.json はこの形で残っている
-await page.evaluate(() => localStorage.setItem('settings', JSON.stringify({ seenSetup: true, layout: { recordWidth: 300, bottomHeight: 250, tab: 'winrate' } })));
+await page.evaluate(() => localStorage.setItem('settings', JSON.stringify({ lang: 'ja', seenSetup: true, layout: { recordWidth: 300, bottomHeight: 250, tab: 'winrate' } })));
 await page.reload({ waitUntil: 'networkidle0' });
 await page.waitForFunction(() => window.tenbin?.builtin?.(), { timeout: 30000 });
 const ev = (fn, ...args) => page.evaluate(fn, ...args);

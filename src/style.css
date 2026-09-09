@@ -1,4 +1,4 @@
-/* 天秤将棋 デスクトップ
+/* 天秤将棋GUI
  *
  * 盤と駒は公開版サイトと同じ（盤の色 #f9b34e と CSS の木目、駒は lishogi kanji_light）。
  * 周りの地は銀鼠。朱＝先手・藍＝後手は天秤の皿と検討の帯にだけ使い、
@@ -218,6 +218,15 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 @media (max-width: 1179px) {
   .tools button span { display: none; }
   .tools button { padding: 0.45rem 0.55rem; }
+}
+/* 英語は語が長いぶん、字を落とす幅を上げる（実測 全部出して 1601px / 右を落として 1342px） */
+@media (max-width: 1619px) {
+  html[lang='en'] .tools.right button span { display: none; }
+  html[lang='en'] .tools.right button { padding: 0.45rem 0.55rem; }
+}
+@media (max-width: 1359px) {
+  html[lang='en'] .tools button span { display: none; }
+  html[lang='en'] .tools button { padding: 0.45rem 0.55rem; }
 }
 .tools button[aria-pressed='true'] { background: var(--panel-2); border-color: var(--ink); }
 

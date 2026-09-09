@@ -1,5 +1,5 @@
 [package]
-name = "tenbin-shogi"
+name = "tenbin-shogi-gui"
 version = "0.3.0"
 description = "天秤将棋のデスクトップGUI（対局・検討）"
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "tenbin_shogi_lib"
+name = "tenbin_shogi_gui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

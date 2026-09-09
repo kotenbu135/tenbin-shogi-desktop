@@ -12,6 +12,7 @@ import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { BuiltinEvaluator } from '../eval/builtin.ts';
 import { BUILTIN_ID } from '../settings.ts';
+import { t } from '../i18n.ts';
 import { HUMAN_ID, LEVELS, type NewGameChoice, type PlayerSpec } from './newgame.ts';
 
 export interface PlayDeps {
@@ -33,6 +34,8 @@ export interface PlayDeps {
   multiPv(): number;
   /** その手を今の局面に指せるか */
   canApply(token: string): boolean;
+  /** 対局が止まった。自分から止めたときも、エンジンの手が拾えず止まったときも呼ぶ */
+  onPause(): void;
 }
 
 /** 画面が 1 度描かれるのを待つ。描かれない場（背景のタブなど）でも 60ms で戻る */
@@ -83,7 +86,8 @@ export class MatchDriver {
     this.paused = true;
     this.gen++;
     this.pendingKey = null;
-    this.endThinking('一時停止');
+    this.endThinking(t('th_paused'));
+    this.deps.onPause();
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
   }
 
@@ -131,8 +135,9 @@ export class MatchDriver {
     this.gen++;
     this.pendingKey = null;
     this.paused = false;
-    this.endThinking('中断');
+    this.endThinking(t('th_aborted'));
     this.seats = null;
+    this.names = ['', '']; // 前の対局の名前を、読み込んだ棋譜や編集から始めた対局へ持ち越さない
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
   }
 
@@ -140,8 +145,8 @@ export class MatchDriver {
   interrupt(): void {
     this.gen++;
     this.pendingKey = null;
-    this.endThinking('中断');
-    for (const t of this.thinkers.values()) void t.stop();
+    this.endThinking(t('th_aborted'));
+    for (const th of this.thinkers.values()) void th.stop();
     this.kick();
   }
 
@@ -167,7 +172,7 @@ export class MatchDriver {
       const chosen = g.chosenColor;
       if (chosen === 'sente') return { sente: b, gote: a };
       if (chosen === 'gote') return { sente: a, gote: b };
-      return { sente: a ? `${a}（玉を置く）` : '', gote: b ? `${b}（先後を選ぶ）` : '' };
+      return { sente: a ? t('seat_placer', { name: a }) : '', gote: b ? t('seat_chooser', { name: b }) : '' };
     }
     return { sente: a, gote: b };
   }
@@ -221,22 +226,39 @@ export class MatchDriver {
     const gen = this.gen;
     try {
       let token = await this.think(cur.seat, cur.spec);
-      if (gen !== this.gen || !this.deps.live()) return;
+      if (gen !== this.gen) return;
+      if (!this.deps.live()) {
+        // 過去の手を見ている間に届いた手は指せない。最新局面へ戻ったときにまた考える
+        if (this.pendingKey === key) this.pendingKey = null;
+        this.endThinking(t('th_aborted'));
+        return;
+      }
       if (this.pendingKey !== key) return;
       // エンジンが今の局面で指せない手を返したら、1 度だけ聞き直す。
       // 前の探索の bestmove を拾ってしまう筋が残っており、そこで対局が死んでいた
       if (token && !this.deps.canApply(token)) {
-        this.deps.onLog(this.names[cur.seat] || 'エンジン', 'sys', `指せない手が返った: ${token} · 局面 ${this.deps.game().positionCommand()}`);
-        this.deps.say('エンジンが指せない手を返しました。もう一度聞いています…');
+        this.deps.onLog(
+          this.names[cur.seat] || t('engine_word'),
+          'sys',
+          t('pl_bad_move_log', { token, pos: this.deps.game().positionCommand() }),
+        );
+        this.deps.say(t('pl_bad_move_retry'));
         token = await this.think(cur.seat, cur.spec);
-        if (gen !== this.gen || !this.deps.live() || this.pendingKey !== key) return;
+        if (gen !== this.gen) return;
+        if (!this.deps.live()) {
+          // 聞き直している間に過去の局面へ移ったときも、戻ったら考え直せるようにしておく
+          if (this.pendingKey === key) this.pendingKey = null;
+          this.endThinking(t('th_aborted'));
+          return;
+        }
+        if (this.pendingKey !== key) return;
       }
       this.pendingKey = null;
-      this.endThinking('指した');
+      this.endThinking(t('th_moved'));
       if (token && !this.deps.canApply(token)) {
-        this.deps.onLog(this.names[cur.seat] || 'エンジン', 'sys', `2 度とも指せない手だった: ${token}`);
-        this.endThinking('止まった');
-        this.deps.say(`エンジンが指せない手（${token}）を返しました。対局を止めます。「待った」で戻すか、新しい対局を始めてください`, true);
+        this.deps.onLog(this.names[cur.seat] || t('engine_word'), 'sys', t('pl_bad_move_twice_log', { token }));
+        this.endThinking(t('th_stopped'));
+        this.deps.say(t('pl_bad_move_stop', { token }), true);
         void this.pause();
         return;
       }
@@ -244,14 +266,14 @@ export class MatchDriver {
     } catch (e) {
       if (gen !== this.gen) return;
       this.pendingKey = null;
-      this.endThinking('止まった');
-      this.deps.say(`エンジンが指せない: ${e instanceof Error ? e.message : String(e)}`, true);
+      this.endThinking(t('th_stopped'));
+      this.deps.say(t('pl_engine_error', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }
 
   /** 読みを検討パネルへ流す準備。同じ席の前の読みは閉じる */
   private beginThinking(seat: 0 | 1, color: Color, cfg: EngineConfig): (info: UsiInfo) => void {
-    this.endThinking('指した');
+    this.endThinking(t('th_moved'));
     this.thinkingSeat = seat;
     this.deps.onThinkStart(seat, color, cfg);
     const gen = this.gen;
@@ -265,7 +287,7 @@ export class MatchDriver {
     let th = this.thinkers.get(key);
     if (!th) {
       th = this.deps.createThinker(id, `play${seat}`) ?? undefined;
-      if (!th) throw new Error('エンジンが登録から消えている');
+      if (!th) throw new Error(t('pl_engine_gone'));
       th.onLog = (dir, text) => this.deps.onLog(th!.config.name || th!.config.path, dir, text);
       this.thinkers.set(key, th);
     }
@@ -296,8 +318,8 @@ export class MatchDriver {
     if (phase === 'normal') {
       if (!spec.normalId) return null; // 本将棋は人が指す
       const th = this.thinker(seat, spec.normalId);
-      if (th.state === 'stopped') {
-        this.deps.say(`${th.config.name} を起動しています…`);
+      if (th.state === 'stopped' || th.state === 'starting') {
+        this.deps.say(t('pl_starting', { name: th.config.name }));
         await th.start();
         await th.newGame();
       }
@@ -305,7 +327,7 @@ export class MatchDriver {
       const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
       if (bm.move === 'resign') return 'resign';
       if (bm.move === 'win') {
-        this.deps.say(`${th.config.name} が入玉宣言をしました（このアプリでは扱えないので投了として記録します）`, true);
+        this.deps.say(t('pl_declare_win', { name: th.config.name }), true);
         return 'resign';
       }
       return bm.move;
@@ -322,27 +344,30 @@ export class MatchDriver {
       return `choose:${builtin ? builtin.choose(kb, kw) : 'sente'}`;
     }
     if (spec.fusekiId === BUILTIN_ID || phase === 'kings') {
-      if (!builtin) throw new Error('内蔵の布石評価が読み込まれていない');
+      if (!builtin) throw new Error(t('pl_builtin_missing'));
       // 候補と勝率を対局の枠とグラフに出してから、温度で 1 手を選ぶ（選ぶ手は 1 位とは限らない）
       const onInfo = this.beginThinking(seat, color, builtin.config);
       try {
         await builtin.start();
+        builtin.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
         await builtin.goInfinite(g.positionCommand(), onInfo);
         // 内蔵の評価は読みが一瞬で終わる。ここで 1 度画面に描かせないと、候補の矢印が
         // 出る間もなく次の手が指されてしまう（外のエンジンは読んでいる間ずっと出ている）
         await painted();
       } catch (e) {
-        this.deps.onLog('内蔵の布石評価', 'sys', `候補を出せない: ${e instanceof Error ? e.message : String(e)}`);
+        this.deps.onLog(t('pl_builtin_label'), 'sys', t('pl_builtin_no_move', { msg: e instanceof Error ? e.message : String(e) }));
       }
       return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin });
     }
     const th = this.thinker(seat, spec.fusekiId);
-    if (th.state === 'stopped') {
-      this.deps.say(`${th.config.name} を起動しています…`);
+    if (th.state === 'stopped' || th.state === 'starting') {
+      this.deps.say(t('pl_starting', { name: th.config.name }));
       await th.start();
       await th.newGame();
     }
     this.sendMultiPv(th);
+    // 布石は天秤将棋と布石将棋で最初の 2 手の意味が違う。position 行からは区別できないので渡す
+    if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
     const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
     return bm.move === 'resign' ? 'resign' : bm.move;
   }

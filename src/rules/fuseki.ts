@@ -5,6 +5,8 @@
 // TS 側でルールを書き直さないのは、禁じ手や利きの判定が C++ 版と静かにズレると
 // 「動くが弱い／間違う」という気付きにくい壊れ方をするため。局面の実体は wasm 側に1つだけある。
 
+import { t } from '../i18n.ts';
+
 export const BLACK = 0 as const; // 先手（cppshogi の Color）
 export const WHITE = 1 as const; // 後手
 export type FusekiColor = typeof BLACK | typeof WHITE;
@@ -65,11 +67,11 @@ export class Fuseki {
     const want1 = FEATURE_PLANES.input1 * FEATURE_PLANES.squares;
     const want2 = FEATURE_PLANES.input2 * FEATURE_PLANES.squares;
     if (f1 !== want1 || f2 !== want2) {
-      throw new Error(`特徴量の形が合わない: features1=${f1}(期待${want1}) features2=${f2}(期待${want2})`);
+      throw new Error(t('fk_feature_shape', { f1, want1, f2, want2 }));
     }
     for (const { pt, usi } of PIECE_TYPES) {
       const got = M.ccall('fw_move_to_usi', 'string', ['number', 'number'], [pt, 0]);
-      if (got[0] !== usi) throw new Error(`PieceType の対応がズレている: pt=${pt} は '${got[0]}'`);
+      if (got[0] !== usi) throw new Error(t('fk_piecetype', { pt, got: String(got[0]) }));
     }
     return new Fuseki(M);
   }
@@ -123,7 +125,7 @@ export class Fuseki {
 
   private findDrop(usi: string): Drop {
     for (const d of this.legalDrops()) if (d.usi === usi) return d;
-    throw new Error(`布石フェーズの合法手ではない: ${usi}`);
+    throw new Error(t('fk_illegal', { usi }));
   }
 
   /** 色 c の持ち駒の残数。 */

@@ -11,6 +11,7 @@
 //   - 天秤将棋の 1〜2 手目は両玉の価値表を引く（実対局の勝率）
 //   - 40 手目で後手玉が先手の利きに当たる形は勝率 0
 import * as ort from 'onnxruntime-web/wasm';
+import { t } from '../i18n.ts';
 import { BLACK, FEATURE_PLANES, Fuseki, type Drop, type FusekiColor } from '../rules/fuseki.ts';
 import type { EngineConfig, EngineState, LogDirection, Thinker } from '../usi/engine.ts';
 import type { Bestmove, UsiInfo } from '../usi/parse.ts';
@@ -42,11 +43,11 @@ const POOL_SIZE = 48;
 /** 天秤将棋の両玉の価値表（公開サイトの kings.js と同じ規則） */
 export class KingTable {
   constructor(readonly data: KingPairTable, modelFile?: string) {
-    if (data?.format !== 'king_pair_table/1') throw new Error(`両玉の価値表の形式が違う: ${data?.format}`);
-    if (!data.pairs || !Array.isArray(data.band)) throw new Error('両玉の価値表に pairs / band が無い');
+    if (data?.format !== 'king_pair_table/1') throw new Error(t('bi_table_format', { format: String(data?.format) }));
+    if (!data.pairs || !Array.isArray(data.band)) throw new Error(t('bi_table_fields'));
     if (modelFile) {
       const gen = (s: string) => (String(s).match(/iter(\d+)/) ?? [])[1];
-      if (gen(modelFile) !== gen(data.model)) throw new Error(`両玉の価値表（${data.model}）と布石ネット（${modelFile}）の世代が違う`);
+      if (gen(modelFile) !== gen(data.model)) throw new Error(t('bi_table_gen', { table: data.model, model: modelFile }));
     }
   }
 
@@ -97,12 +98,11 @@ export interface BuiltinResult {
 export class BuiltinEvaluator implements Thinker {
   readonly config: EngineConfig;
   state: EngineState = 'stopped';
-  idName = '内蔵の布石評価';
+  idName = t('bi_name');
   onLog: ((dir: LogDirection, text: string) => void) | null = null;
   onStateChange: ((s: EngineState) => void) | null = null;
   method: BuiltinMethod = 'value';
   private generation = 0;
-  private chain: Promise<unknown> = Promise.resolve();
 
   private constructor(
     readonly fuseki: Fuseki,
@@ -110,8 +110,10 @@ export class BuiltinEvaluator implements Thinker {
     private readonly value: ort.InferenceSession,
     readonly kings: KingTable | null,
     readonly manifest: ModelManifest,
+    /** 盤も模型も 1 つしか無いので、重い計算はここに並べて順に走らせる（手の間で共有する） */
+    private readonly shared: { chain: Promise<unknown> } = { chain: Promise.resolve() },
   ) {
-    this.config = { id: 'builtin', name: '内蔵の布石評価', path: '', kind: 'fuseki', options: {}, eval: { ...BUILTIN_EVAL } };
+    this.config = { id: 'builtin', name: t('bi_name'), path: '', kind: 'fuseki', options: {}, eval: { ...BUILTIN_EVAL } };
   }
 
   /**
@@ -122,9 +124,9 @@ export class BuiltinEvaluator implements Thinker {
   static async load(modelsUrl: string, wasmUrl: string, ortDir: string): Promise<BuiltinEvaluator> {
     const base = modelsUrl.endsWith('/') ? modelsUrl : modelsUrl + '/';
     const res = await fetch(base + 'models.json');
-    if (!res.ok) throw new Error(`モデルの一覧を読めない: ${res.status} ${base}models.json`);
+    if (!res.ok) throw new Error(t('bi_models_unreadable', { status: res.status, url: `${base}models.json` }));
     const manifest = (await res.json()) as ModelManifest;
-    if (manifest.format !== 'tenbin-models/1') throw new Error(`モデルの一覧の形式が違う: ${manifest.format}`);
+    if (manifest.format !== 'tenbin-models/1') throw new Error(t('bi_models_format', { format: manifest.format }));
     ort.env.wasm.wasmPaths = { wasm: ortDir + 'ort-wasm-simd-threaded.wasm', mjs: ortDir + 'ort-wasm-simd-threaded.mjs' };
     ort.env.wasm.numThreads = 1;
     ort.env.logLevel = 'error';
@@ -133,19 +135,29 @@ export class BuiltinEvaluator implements Thinker {
       ort.InferenceSession.create(base + manifest.policy.file, { executionProviders: ['wasm'] }),
       ort.InferenceSession.create(base + manifest.value.file, { executionProviders: ['wasm'] }),
     ]);
-    for (const [s, what] of [[policy, '方策'], [value, '価値ネット']] as const) {
-      for (const name of ['input1', 'input2']) if (!s.inputNames.includes(name)) throw new Error(`${what}の ONNX に入力 ${name} が無い`);
+    for (const [s, what] of [[policy, t('bi_policy')], [value, t('bi_value')]] as const) {
+      for (const name of ['input1', 'input2']) if (!s.inputNames.includes(name)) throw new Error(t('bi_missing_input', { what, name }));
     }
-    if (!policy.outputNames.includes('output_policy')) throw new Error('方策の ONNX に output_policy が無い');
-    if (!value.outputNames.includes('output_value')) throw new Error('価値ネットの ONNX に output_value が無い');
+    if (!policy.outputNames.includes('output_policy')) throw new Error(t('bi_missing_policy_out'));
+    if (!value.outputNames.includes('output_value')) throw new Error(t('bi_missing_value_out'));
     let kings: KingTable | null = null;
     try {
       const kr = await fetch(base + manifest.kings.file);
       if (kr.ok) kings = new KingTable((await kr.json()) as KingPairTable, manifest.policy.file);
     } catch (e) {
-      console.warn('両玉の価値表を読めない。天秤将棋の 1〜2 手目は価値ネットで代用する', e);
+      console.warn(t('bi_table_unreadable'), e);
     }
     return new BuiltinEvaluator(fuseki, policy, value, kings, manifest);
+  }
+
+  /**
+   * 同じ模型を使う別の手。検討の欄ごと・棋譜解析ごとに分けて持つと、世代の数え札と
+   * ルール（Fuseki_Mode）が混ざらず、片方の探索がもう片方を黙って打ち消さない。
+   */
+  view(): BuiltinEvaluator {
+    const v = new BuiltinEvaluator(this.fuseki, this.policy, this.value, this.kings, this.manifest, this.shared);
+    v.method = this.method;
+    return v;
   }
 
   private setState(s: EngineState): void {
@@ -163,19 +175,22 @@ export class BuiltinEvaluator implements Thinker {
   }
 
   send(line: string): void {
-    this.onLog?.('sys', `内蔵の評価は USI の行を受けない: ${line}`);
+    this.onLog?.('sys', t('bi_no_usi', { line }));
   }
 
   async newGame(): Promise<void> {
     await this.stop();
   }
 
-  setOption(): void {
-    // 内蔵には送る項目が無い
+  /** ルール。天秤将棋なら 1〜2 手目を両玉の置き場として扱う。position 行からは区別できないので受け取る */
+  private fusekiMode: 'tenbin' | 'fuseki' | null = null;
+
+  setOption(name: string, value: string | number): void {
+    if (name === 'Fuseki_Mode') this.fusekiMode = value === 'tenbin' ? 'tenbin' : 'fuseki';
   }
 
-  hasOption(): boolean {
-    return false;
+  hasOption(name: string): boolean {
+    return name === 'Fuseki_Mode';
   }
 
   async stop(): Promise<void> {
@@ -192,15 +207,17 @@ export class BuiltinEvaluator implements Thinker {
   }
 
   async goInfinite(positionCmd: string, onInfo: (info: UsiInfo) => void): Promise<void> {
-    if (this.state === 'stopped') throw new Error('内蔵の評価が準備できていない');
+    if (this.state === 'stopped') throw new Error(t('bi_not_ready'));
     const tokens = BuiltinEvaluator.tokensOf(positionCmd);
-    if (!tokens) throw new Error('内蔵の評価は布石の局面だけを受ける');
+    if (!tokens) throw new Error(t('bi_fuseki_only'));
     await this.stop();
     const gen = ++this.generation;
     this.setState('thinking');
     const t0 = performance.now();
     try {
-      const r = await this.evaluate(tokens, this.method, { tenbin: /choose:/.test(positionCmd) || tokens.length < 2 });
+      // ルールが渡されていないときだけ、手数から推し量る（布石将棋の 1〜2 手目を玉置きと誤るので、渡すのが本筋）
+      const tenbin = this.fusekiMode ? this.fusekiMode === 'tenbin' : /choose:/.test(positionCmd) || tokens.length < 2;
+      const r = await this.evaluate(tokens, this.method, { tenbin });
       if (gen !== this.generation) return;
       const ms = Math.round(performance.now() - t0);
       // 後ろから流す。1 位の info が来た時点で全候補が揃っているので、受け手が 1 位だけを合図にしても取りこぼさない
@@ -224,7 +241,7 @@ export class BuiltinEvaluator implements Thinker {
 
   async go(positionCmd: string, _goArgs: string, onInfo?: (info: UsiInfo) => void): Promise<Bestmove> {
     const tokens = BuiltinEvaluator.tokensOf(positionCmd);
-    if (!tokens) throw new Error('内蔵の評価は布石の局面だけを受ける');
+    if (!tokens) throw new Error(t('bi_fuseki_only'));
     let best: string | null = null;
     await this.goInfinite(positionCmd, (info) => {
       if (info.multipv === 1 && info.pv?.[0]) best = info.pv[0];
@@ -301,8 +318,8 @@ export class BuiltinEvaluator implements Thinker {
   /** 候補の勝率。呼び出しは直列にする（盤が 1 つしか無い） */
   evaluate(tokens: string[], method: BuiltinMethod, opts: { tenbin: boolean }): Promise<BuiltinResult> {
     const run = () => this.evaluateNow(tokens, method, opts);
-    const next = this.chain.then(run, run);
-    this.chain = next.then(() => undefined, () => undefined);
+    const next = this.shared.chain.then(run, run);
+    this.shared.chain = next.then(() => undefined, () => undefined);
     return next;
   }
 
@@ -452,7 +469,7 @@ export class BuiltinEvaluator implements Thinker {
           if (best) return `K*${best.sq}`;
         }
       }
-      if (legal.length === 0) throw new Error('布石で合法手が無い');
+      if (legal.length === 0) throw new Error(t('bi_no_legal'));
       const [logits] = await this.runPolicy([this.fuseki.policyInputs()]);
       const raw = legal.map((d) => logits![this.fuseki.compactLabel(d.pt, d.sq, color)]!);
       const max = Math.max(...raw);
@@ -489,8 +506,8 @@ export class BuiltinEvaluator implements Thinker {
       });
       return legal[bi]!.usi;
     };
-    const next = this.chain.then(run, run);
-    this.chain = next.then(() => undefined, () => undefined);
+    const next = this.shared.chain.then(run, run);
+    this.shared.chain = next.then(() => undefined, () => undefined);
     return next;
   }
 

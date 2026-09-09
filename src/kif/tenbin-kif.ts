@@ -73,7 +73,7 @@ function stamp(d: Date): string {
 /** 対局全体を KIF（このアプリの方言）にする。 */
 export function writeKif(game: Game, meta: KifMeta = {}): string {
   const lines: string[] = [];
-  lines.push('# KIF形式棋譜ファイル 天秤将棋デスクトップ');
+  lines.push('# KIF形式棋譜ファイル 天秤将棋GUI');
   if (meta.startedAt) lines.push(`開始日時：${stamp(meta.startedAt)}`);
   const kind = game.mode === 'tenbin' ? '天秤将棋' : game.mode === 'fuseki' ? '布石将棋' : 'その他';
   lines.push(`手合割：${kind}`);
@@ -119,7 +119,7 @@ export function writeNormalOnlyKif(game: Game, meta: KifMeta = {}): string | nul
   const start = game.startPosition();
   if (!start) return null;
   const lines: string[] = [];
-  lines.push('# KIF形式棋譜ファイル 天秤将棋デスクトップ（本将棋の部分）');
+  lines.push('# KIF形式棋譜ファイル 天秤将棋GUI（本将棋の部分）');
   lines.push('手合割：その他');
   lines.push(makeKifHeader(start));
   lines.push(`先手：${meta.sente ?? ''}`);
@@ -131,13 +131,16 @@ export function writeNormalOnlyKif(game: Game, meta: KifMeta = {}): string | nul
     lines.push(`${String(n).padStart(4, ' ')} ${pad(makeKifMoveOrDrop(step.pos, step.md, step.lastDest) ?? step.record.usi, 14)}${timeText(step.record.time)}`);
   }
   const last = game.moves[game.moves.length - 1];
-  if (last && (last.usi === 'resign' || last.usi === 'timeout')) {
+  const ended = !!last && (last.usi === 'resign' || last.usi === 'timeout');
+  if (ended) {
     n++;
     lines.push(`${String(n).padStart(4, ' ')} ${pad(last.usi === 'resign' ? '投了' : '切れ負け', 14)}${timeText(last.time)}`);
   }
   if (game.over) {
     const w = game.over.winner;
-    lines.push(w ? `まで${n - 1}手で${colorName(w)}の勝ち` : `まで${n}手で引き分け`);
+    // 「まで n 手」は指した手の数。投了・切れ負けの行は数えない（詰みや裁定で終わったときは行が無い）
+    const played = ended ? n - 1 : n;
+    lines.push(w ? `まで${played}手で${colorName(w)}の勝ち` : `まで${played}手で引き分け`);
   }
   return lines.join('\n') + '\n';
 }
@@ -194,7 +197,7 @@ export function parseKif(text: string): ParsedKif {
     const time = parseTime(m[3]);
     if (mv === '投了') { tokens.push('resign'); times.push(time); break; }
     if (mv === '切れ負け') { tokens.push('timeout'); times.push(time); break; }
-    if (mv === '中断' || mv === '千日手' || mv === '持将棋' || mv === '不戦勝' || mv === '不戦敗' || mv === '反則勝ち' || mv === '反則負け' || mv === '入玉勝ち') break;
+    if (mv === '中断' || mv === '千日手' || mv === '持将棋' || mv === '不戦勝' || mv === '不戦敗' || mv === '反則勝ち' || mv === '反則負け' || mv === '入玉勝ち' || mv === '詰み' || mv === '不詰') break;
     ply++;
     if (mode !== 'position' && ply <= 40) {
       const usi = parseFusekiDrop(mv);

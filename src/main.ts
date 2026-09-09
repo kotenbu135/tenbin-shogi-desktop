@@ -3,9 +3,10 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
-import { Game, rebuild, squareText, colorName, colorMark, type Mode, type ViewState, type Color } from './state/game.ts';
+import { Game, rebuild, squareLabel, colorMark, overReasonText, type Mode, type ViewState, type Color } from './state/game.ts';
+import { lang, setLang, sideName, t, type Lang } from './i18n.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
-import { BUILTIN_ID, loadSettings, saveSettings, type Settings } from './settings.ts';
+import { BUILTIN_ID, loadSettings, saveSettings, settingsLoadError, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { Layout } from './ui/layout.ts';
@@ -38,10 +39,10 @@ async function loadBuiltin(log: (text: string) => void): Promise<BuiltinEvaluato
   try {
     const base = new URL('/', location.href).href;
     const b = await BuiltinEvaluator.load(base + 'models/', base + 'wasm/fuseki.mjs', base + 'vendor/ort/');
-    log(`内蔵の布石評価: 方策 ${b.manifest.policy.file} / 価値ネット ${b.manifest.value.file}${b.kings ? ' / 両玉の価値表' : ''}`);
+    log(t('msg_builtin_loaded', { policy: b.manifest.policy.file, value: b.manifest.value.file, kings: b.kings ? t('msg_builtin_kings') : '' }));
     return b;
   } catch (e) {
-    log(`内蔵の布石評価を読めない: ${e instanceof Error ? e.message : String(e)}`);
+    log(t('msg_builtin_failed', { msg: e instanceof Error ? e.message : String(e) }));
     return null;
   }
 }
@@ -51,6 +52,15 @@ const START_SFEN = 'lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b 
 
 async function main(): Promise<void> {
   const settings: Settings = await loadSettings();
+  setLang(settings.lang);
+  // index.html に直に書いてある文言はここで言語に合わせる（<html lang> は setLang が直す）
+  document.title = t('app_name');
+  // 窓の題（OS 側）は WebView の <title> と別。設定の言語に合わせる
+  if (isTauri()) {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().setTitle(t('app_name'))).catch(() => {});
+  }
+  $('split-v').setAttribute('aria-label', t('split_record'));
+  $('split-h').setAttribute('aria-label', t('split_bottom'));
   applyTheme(settings.theme);
 
   const fuseki = await Fuseki.load(new URL('/wasm/fuseki.mjs', location.href).href);
@@ -92,13 +102,25 @@ async function main(): Promise<void> {
     openEngines: () => engineDialog.open(),
     register: (path, name, evalScale) => engineDialog.addInstalled(path, name, evalScale),
     say: (text, error) => say(text, error),
+    beforeInstall: () => updateDeps.beforeInstall(),
   });
+
+  /** 内蔵の布石評価の、利用者ごとの手（検討の欄・棋譜解析）。模型は 1 つを共有する */
+  const builtinViews = new Map<string, BuiltinEvaluator>();
 
   /** id（'builtin' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
   function createThinker(id: string, processTag: string): Thinker | null {
     if (id === BUILTIN_ID) {
-      if (builtin) builtin.method = settings.builtinMethod;
-      return builtin;
+      if (!builtin) return null;
+      // 同じ実体を配ると、世代の数え札とルールを共有してしまい、片方の探索が
+      // もう片方を黙って打ち消す（欄が空のまま止まる／解析から手が抜ける）
+      let v = builtinViews.get(processTag);
+      if (!v) {
+        v = builtin.view();
+        builtinViews.set(processTag, v);
+      }
+      v.method = settings.builtinMethod;
+      return v;
     }
     const cfg = settings.engines.find((e) => e.id === id);
     if (!cfg) return null;
@@ -115,26 +137,39 @@ async function main(): Promise<void> {
     return e === null ? null : { p: e.p, cp: e.cp, approx: e.approx };
   }
 
+  /** 次のフレームで描く評価（info ごとに描き直さないための溜め） */
+  let evalPaint: { ply: number; ev: { p: number; cp: number | null; approx: boolean }; board: boolean } | null = null;
   const analysis = new AnalysisPanel($('analysis'), $('play'), {
     settings: () => settings,
     save: () => saveSettings(settings),
     createThinker,
     onEvaluation: (ply, ev, lines, source) => {
       setEval(ply, ev, source);
-      const v = lastView ?? currentView();
-      paintGraph(ply === v.ply ? { p: ev.p, cp: ev.cp, approx: ev.approx } : null);
       // 矢印は検討の候補だけ。ただし**エンジン同士**なら対局中の読みも出す
       // （人に手を先に見せる心配が無い。人が入っている対局では出さない）
-      if (source !== 'analysis' && !driver.allEngines) return;
-      shapes = [];
-      for (const l of lines.slice(0, 3)) {
-        const mv = l.pv[0];
-        if (!mv || mv.length < 4) continue;
-        const to = mv.slice(2, 4);
-        if (shapes.some((s) => s.to === to)) continue;
-        shapes.push(mv[1] === '*' ? { to, rank: l.multipv } : { from: mv.slice(0, 2), to, rank: l.multipv });
+      let board = false;
+      if (source === 'analysis' || driver.allEngines) {
+        shapes = [];
+        for (const l of lines.slice(0, 3)) {
+          const mv = l.pv[0];
+          if (!mv || mv.length < 4) continue;
+          const to = mv.slice(2, 4);
+          if (shapes.some((s) => s.to === to)) continue;
+          shapes.push(mv[1] === '*' ? { to, rank: l.multipv } : { from: mv.slice(0, 2), to, rank: l.multipv });
+        }
+        board = true;
       }
-      paintBoard();
+      // info は毎秒何十行も来る。グラフと盤の描き直しは 1 フレームに 1 回にまとめる
+      if (!evalPaint) {
+        requestAnimationFrame(() => {
+          const p = evalPaint!;
+          evalPaint = null;
+          const v = lastView ?? currentView();
+          paintGraph(p.ply === v.ply ? { p: p.ev.p, cp: p.ev.cp, approx: p.ev.approx } : null);
+          if (p.board) paintBoard();
+        });
+      }
+      evalPaint = { ply, ev, board: board || (evalPaint?.board ?? false) };
     },
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
     openEngineSettings: () => engineDialog.open(),
@@ -144,7 +179,7 @@ async function main(): Promise<void> {
       // 止めても盤は触れる（自分で駒を動かして変化を並べられる）
       if (driver.active && !driver.isPaused && game.phase !== 'over') void togglePause();
     },
-    pvText: (usis, t) => gameForPv(t).japanesePv(usis),
+    pvText: (usis, t) => gameForPv(t).pvText(usis),
   });
 
   const kifuAnalyzer = new KifuAnalyzer({
@@ -173,10 +208,10 @@ async function main(): Promise<void> {
       return;
     }
     if (game.moves.length === 0) {
-      say('棋譜がまだありません', true);
+      say(t('msg_no_kifu'), true);
       return;
     }
-    if (driver.active && game.phase !== 'over' && !confirm('対局中です。エンジンと解析で計算を取り合いますが、棋譜解析を始めますか')) return;
+    if (driver.active && game.phase !== 'over' && !confirm(t('confirm_kifu_analysis'))) return;
     const cursorPly = cursor === null ? 0 : currentView().ply;
     const o = await askKifuAnalysis($('dialogs'), { secPerMove: settings.kifuAnalysisSec, hasCursor: cursor !== null, cursorPly });
     if (!o) return;
@@ -185,7 +220,7 @@ async function main(): Promise<void> {
     const fromIndex = o.fromIndex < 0 ? cursor ?? 0 : 0;
     const t0 = performance.now();
     const n = await kifuAnalyzer.run({ fromIndex, secPerMove: o.secPerMove });
-    if (n > 0) say(`棋譜解析: ${n} 局面を ${((performance.now() - t0) / 1000).toFixed(0)} 秒で評価しました`);
+    if (n > 0) say(t('msg_kifu_analysis_done', { n, sec: ((performance.now() - t0) / 1000).toFixed(0) }));
   }
   usiConsole.onSend = (line) => analysis.sendRaw(line);
 
@@ -209,6 +244,12 @@ async function main(): Promise<void> {
     },
     multiPv: () => settings.playMultiPv,
     canApply: (token) => game.canApply(token),
+    // 一時停止はボタンからだけでなく、エンジンが指せない手を返したときにも起きる。
+    // どちらでも時計は止め、ボタンの表示も「再開」に直す
+    onPause: () => {
+      clock.pause();
+      paintAll();
+    },
     onThinking: (seat, info) => analysis.playerInfo(halfInUse.get(seat) ?? halfOfSeat(seat), info),
     onThinkEnd: (seat, state) => {
       thinkingColor = null;
@@ -232,12 +273,12 @@ async function main(): Promise<void> {
   function sideLabel(half: 0 | 1): string {
     if (beforeChoice()) {
       const seat = half;
-      const role = seat === 0 ? '玉を置く' : '先後を選ぶ';
+      const role = t(seat === 0 ? 'role_placer' : 'role_chooser');
       const name = driver.seatName(seat);
-      return name ? `${name}（${role}）` : role;
+      return name ? t('name_with_role', { name, role }) : role;
     }
     const color: Color = half === 0 ? 'sente' : 'gote';
-    return `${colorMark(color)} ${names()[color] || colorName(color)}`;
+    return `${colorMark(color)} ${names()[color] || sideName(color)}`;
   }
 
   /** 先後が決まると席と左右の対応が入れ替わる。前の読みは別の人のものになるので消す */
@@ -274,6 +315,7 @@ async function main(): Promise<void> {
     cursor = idx >= game.moves.length ? null : idx;
     board.clearSelection();
     paintAll();
+    if (cursor === null) driver.kick(); // 見ている間に届いた手は捨てているので、戻ったら考え直させる
   };
   for (const g of graphs) g.onSeek = seek;
   const layout = new Layout($('main'), $('bottom'), { play: $('play'), analysis: $('analysis'), score: scoreEl, winrate: winrateEl }, {
@@ -288,7 +330,7 @@ async function main(): Promise<void> {
     if (v.phase !== 'over') stage = v.phase;
     else if (game.mode === 'position' || v.ply >= 40) stage = 'normal';
     else stage = game.mode === 'tenbin' && v.ply < 2 ? 'kings' : 'fuseki';
-    return { positionCmd: v.positionCmd, phase: v.phase, stage, turn: v.turn, ply: v.ply };
+    return { positionCmd: v.positionCmd, phase: v.phase, stage, turn: v.turn, ply: v.ply, mode: game.mode };
   }
   const kifu = new KifuList($('kifu'), {
     onSeek: (c) => {
@@ -296,6 +338,7 @@ async function main(): Promise<void> {
       cursor = c;
       board.clearSelection();
       paintAll();
+      if (cursor === null) driver.kick(); // 見ている間に届いた手は捨てているので、戻ったら考え直させる
     },
   });
   const board = new Board($('board'), {
@@ -304,7 +347,7 @@ async function main(): Promise<void> {
       const { can, forced } = game.promotion(from, to);
       let promote = false;
       if (forced) promote = true;
-      else if (can) promote = confirm(`${squareText(to)}へ 成りますか？（キャンセルで不成）`);
+      else if (can) promote = confirm(t('confirm_promote', { sq: squareLabel(to) }));
       tryApply(`${from}${to}${promote ? '+' : ''}`);
     },
     onEditSquare: (sq) => editor?.handleSquare(sq),
@@ -354,9 +397,11 @@ async function main(): Promise<void> {
     clock = c;
     clock.onTick = () => board.updateClocks(clockViews());
     clock.onTimeout = (loser) => {
-      if (game.phase === 'over' || game.turn !== loser) return;
+      if (game.phase === 'over' || game.actingColor !== loser) return;
+      // 過去の手を見ていても負けは負け。最新局面へ戻してから記録する（戻さないと tryApply が黙って捨てる）
+      cursor = null;
       tryApply('timeout');
-      say(`${colorName(loser)}の時間切れ`);
+      say(t('over_timeout', { side: sideName(loser) }));
     };
   }
 
@@ -365,17 +410,20 @@ async function main(): Promise<void> {
   }
 
   // ---- 対局の操作 ----
-  function tryApply(token: string): void {
+  function tryApply(token: string, loser?: Color): void {
     if (cursor !== null || editor) return;
     try {
-      const rec = game.apply(token);
+      const rec = game.apply(token, undefined, loser);
+      // 選ぶ側が先手を取ったら、席ごとに計っていた時計の枠を色に合わせて入れ替える
+      if (token === 'choose:sente') clock.swap();
       if (game.phase === 'over') {
         clock.stop();
+        if (driver.isPaused) driver.resume(); // 終局に「一時停止中」を残さない（再開のボタンは終局で押せなくなる）
       } else {
-        const t = clock.press(game.turn);
+        const t = clock.press(game.actingColor);
         if (t) rec.time = t;
-        // press は次の手番の時計を動かす。止めている間に並べた手で時計が動き出さないように戻す
-        if (driver.isPaused) clock.stop();
+        // press は次の手番の時計を動かす。止めている間に並べた手で時計が動き出さないように止めておく
+        if (driver.isPaused) clock.pause();
       }
       paintAll();
       driver.kick();
@@ -392,7 +440,7 @@ async function main(): Promise<void> {
     game = new Game(fuseki, mode, startSfen);
     meta = { sente: m.sente ?? '', gote: m.gote ?? '', timeControl: m.timeControl ?? null, startedAt: new Date() };
     attachClock(new Clock(meta.timeControl));
-    if (clock.enabled) clock.start(game.turn);
+    if (clock.enabled) clock.start(game.actingColor);
     cursor = null;
     evals.clear();
     shapes = [];
@@ -403,7 +451,7 @@ async function main(): Promise<void> {
   }
 
   async function newGame(): Promise<void> {
-    if (game.moves.length > 0 && game.phase !== 'over' && !confirm('いまの対局を捨てて新しく始めますか')) return;
+    if (game.moves.length > 0 && game.phase !== 'over' && !confirm(t('confirm_new'))) return;
     const c: NewGameChoice | null = await newGameDialog.open();
     if (!c) return;
     startGame(c.mode, { timeControl: c.timeControl }, c.mode === 'position' ? START_SFEN : undefined);
@@ -420,7 +468,10 @@ async function main(): Promise<void> {
     cursor = null;
     dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
-    if (clock.enabled) clock.start(game.turn);
+    // 残り時間を記録から組み直す（枠の入れ替えも時間切れで 0 にした分もここで戻る）
+    clock.restore(game.spentSec());
+    if (clock.enabled) clock.start(game.actingColor);
+    if (driver.isPaused) clock.pause(); // 止めている間に戻しても時計は動かさない
     paintAll();
     driver.interrupt();
   }
@@ -437,7 +488,10 @@ async function main(): Promise<void> {
     game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times });
     dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
-    if (clock.enabled) clock.start(game.turn);
+    // 残り時間を記録から組み直す（枠の入れ替えも時間切れで 0 にした分もここで戻る）
+    clock.restore(game.spentSec());
+    if (clock.enabled) clock.start(game.actingColor);
+    if (driver.isPaused) clock.pause(); // 止めている間に戻しても時計は動かさない
     paintAll();
     driver.interrupt();
   }
@@ -448,21 +502,21 @@ async function main(): Promise<void> {
   }
 
   function phaseText(v: ViewState): string {
-    const turn = colorName(v.turn);
+    const turn = sideName(v.turn);
     const next = v.ply + 1;
     switch (v.phase) {
       case 'kings':
-        return next === 1 ? '置く人が、先手陣に先手玉を置きます' : '続けて、後手陣に後手玉を置きます';
+        return t(next === 1 ? 'st_place_sente' : 'st_place_gote');
       case 'choose':
-        return '選ぶ人が、先手を持つか後手を持つかを決めます';
+        return t('st_choose');
       case 'fuseki':
-        return `布石 ${next}手目 · ${turn}が置きます（残り ${41 - next}手）`;
+        return t('st_fuseki', { n: next, turn, left: 41 - next });
       case 'normal':
-        return `本将棋 ${next}手目 · ${turn}番`;
+        return t('st_normal', { n: next, turn });
       case 'over': {
         const o = v.over!;
-        const w = o.winner === null ? '引き分け' : `${colorName(o.winner)}の勝ち`;
-        return `終局 · ${w}（${o.reason}）`;
+        const w = o.winner === null ? t('draw') : t('win_of', { side: sideName(o.winner) });
+        return t('st_over', { result: w, reason: overReasonText(o.reason) });
       }
     }
   }
@@ -502,6 +556,19 @@ async function main(): Promise<void> {
     return seat === null || driver.humanAt(seat);
   }
 
+  /**
+   * 投了する側の色。エンジンと指しているなら人の席の色（相手の手番でも一時停止中でも、
+   * 投げるのは押した本人）。人同士は手番の側。エンジン同士は投げる人がいないので null。
+   */
+  function resignColor(): Color | null {
+    if (!driver.playing) return game.actingColor;
+    const humans = ([0, 1] as const).filter((s) => driver.humanAt(s));
+    if (humans.length === 1) return halfOfSeat(humans[0]!) === 0 ? 'sente' : 'gote';
+    if (humans.length === 0) return null;
+    const seat = driver.seatToMove();
+    return seat === null || driver.humanAt(seat) ? game.actingColor : null;
+  }
+
   function paintBoard(): void {
     if (editor) {
       board.render(editor.snapshot(), {
@@ -538,7 +605,7 @@ async function main(): Promise<void> {
     shapes = [];
     autoFlip();
     paintBoard();
-    kifu.render(game.moves, cursor, cursor === null ? undefined : `${v.ply}手目の局面を表示中`);
+    kifu.render(game.moves, cursor, cursor === null ? undefined : t('kifu_viewing', { n: v.ply }));
     paintSide(v);
     paintPlaySides();
     paintGraph(null);
@@ -546,9 +613,9 @@ async function main(): Promise<void> {
     kifu.revealCurrent();
     say(
       cursor !== null
-        ? `${phaseText(v)} · 過去の局面（→ か End で最新へ）`
+        ? t('st_past', { phase: phaseText(v) })
         : driver.isPaused
-          ? `${phaseText(v)} · 一時停止中（「再開」で続きます）`
+          ? t('st_paused', { phase: phaseText(v) })
           : phaseText(v),
     );
     void analysis.setTarget(targetOf(v));
@@ -578,7 +645,7 @@ async function main(): Promise<void> {
     const b = document.querySelector<HTMLButtonElement>('[data-act="pause"]');
     if (!b) return;
     const on = driver.isPaused;
-    b.innerHTML = `${on ? ICON.play : ICON.pause}<span>${on ? '再開' : '一時停止'}</span>`;
+    b.innerHTML = `${on ? ICON.play : ICON.pause}<span>${t(on ? 'tb_resume' : 'tb_pause')}</span>`;
     b.disabled = !driver.active || game.phase === 'over';
     b.setAttribute('aria-pressed', String(on));
   }
@@ -587,10 +654,9 @@ async function main(): Promise<void> {
   async function togglePause(): Promise<void> {
     if (driver.isPaused) {
       driver.resume();
-      if (clock.enabled && game.phase !== 'over') clock.start(game.turn);
+      clock.resume(); // 止める前に使っていた時間から続ける
     } else {
-      await driver.pause();
-      clock.stop();
+      await driver.pause(); // 時計を止めて描き直すのは driver の onPause
     }
     paintAll();
   }
@@ -601,16 +667,20 @@ async function main(): Promise<void> {
     const title = document.createElement('div');
     title.className = 'game-title';
     title.textContent =
-      game.mode === 'tenbin' ? '天秤将棋' : game.mode === 'fuseki' ? '布石将棋' : game.normalStartSfen === START_SFEN ? '本将棋' : '本将棋（任意の局面から）';
+      game.mode === 'tenbin'
+        ? t('game_tenbin')
+        : game.mode === 'fuseki'
+          ? t('game_fuseki')
+          : t(game.normalStartSfen === START_SFEN ? 'game_normal' : 'game_normal_pos');
     el.appendChild(title);
     if (cursor !== null) {
       const p = document.createElement('div');
       p.className = 'branch';
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = 'この局面から指し直す';
+      b.textContent = t('branch_btn');
       b.addEventListener('click', () => {
-        if (confirm(`${v.ply}手目以降の ${game.moves.length - cursor!} 手を消して、ここから指し直しますか`)) branchHere();
+        if (confirm(t('branch_confirm', { n: v.ply, k: game.moves.length - cursor! }))) branchHere();
       });
       p.appendChild(b);
       el.appendChild(p);
@@ -619,20 +689,23 @@ async function main(): Promise<void> {
     if (v.phase === 'over' && v.over) {
       const p = document.createElement('div');
       p.className = 'result';
-      const w = v.over.winner === null ? '引き分け' : `${colorMark(v.over.winner)} ${names()[v.over.winner] || colorName(v.over.winner)}の勝ち`;
-      p.innerHTML = `<strong>終局</strong> ${escapeText(w)}（${escapeText(v.over.reason)}）<span class="result-hint">棋譜解析で振り返るか、局面を選んで検討できます</span>`;
+      const w =
+        v.over.winner === null
+          ? t('draw')
+          : t('win_of', { side: `${colorMark(v.over.winner)} ${names()[v.over.winner] || sideName(v.over.winner)}` });
+      p.innerHTML = `<strong>${escapeText(t('result_head'))}</strong> ${escapeText(w)}（${escapeText(overReasonText(v.over.reason))}）<span class="result-hint">${escapeText(t('result_hint'))}</span>`;
       el.appendChild(p);
       return;
     }
     if (v.phase === 'choose') {
       const p = document.createElement('div');
       p.className = 'choose';
-      p.innerHTML = `<p>両玉が置かれました。選ぶ人はどちらを持ちますか。</p>`;
+      p.innerHTML = `<p>${escapeText(t('choose_prompt'))}</p>`;
       for (const c of ['sente', 'gote'] as const) {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = c === 'sente' ? 'primary' : '';
-        b.textContent = c === 'sente' ? '☗ 先手を持つ' : '☖ 後手を持つ';
+        b.textContent = t(c === 'sente' ? 'choose_sente_btn' : 'choose_gote_btn');
         b.addEventListener('click', () => tryApply(`choose:${c}`));
         p.appendChild(b);
       }
@@ -640,7 +713,7 @@ async function main(): Promise<void> {
     } else if (game.mode === 'tenbin' && game.chosenColor) {
       const p = document.createElement('div');
       p.className = 'chosen';
-      p.textContent = `選ぶ人は${colorName(game.chosenColor)}を持ちました`;
+      p.textContent = t('chosen_note', { side: sideName(game.chosenColor) });
       el.appendChild(p);
     }
   }
@@ -648,8 +721,12 @@ async function main(): Promise<void> {
   // ---- 局面編集 ----
   function enterEditor(): void {
     if (editor) return;
+    // 席の名前は abort() で消える。やめて戻ったときのために meta へ写しておく
+    const n = names();
+    meta = { ...meta, sente: n.sente ?? '', gote: n.gote ?? '' };
     void analysis.stop();
     void driver.abort();
+    clock.stop(); // 対局は捨てる。編集中に時間切れが起きても記録できない
     const v = currentView();
     editor = new PositionEditor(editorEl, {
       onChange: () => paintBoard(),
@@ -659,6 +736,11 @@ async function main(): Promise<void> {
       },
       onCancel: () => {
         exitEditor();
+        // enterEditor で止めた時計を戻す。戻さないと以降の手が消費時間なしで記録される
+        if (clock.enabled && game.phase !== 'over') {
+          clock.start(game.actingColor);
+          if (driver.isPaused) clock.pause();
+        }
         paintAll();
       },
     });
@@ -666,7 +748,7 @@ async function main(): Promise<void> {
     else editor.loadSfen(START_SFEN);
     editorEl.hidden = false;
     document.body.classList.add('editing');
-    say('局面編集中。駒を置いて「この局面から本将棋を始める」を押します');
+    say(t('msg_editor_hint'));
     paintBoard();
   }
 
@@ -681,11 +763,11 @@ async function main(): Promise<void> {
   async function saveKif(normalOnly: boolean): Promise<void> {
     const text = normalOnly ? writeNormalOnlyKif(game, kifMeta()) : writeKif(game, kifMeta());
     if (text === null) {
-      say('本将棋がまだ始まっていないので、本将棋だけの棋譜は作れません', true);
+      say(t('msg_no_normal_kif'), true);
       return;
     }
     if (!isTauri()) {
-      say('棋譜の保存は Tauri のアプリ内でだけできます', true);
+      say(t('msg_save_tauri_only'), true);
       console.log(text);
       return;
     }
@@ -693,26 +775,26 @@ async function main(): Promise<void> {
     const d = new Date();
     const p = (n: number) => String(n).padStart(2, '0');
     const name = `${game.mode === 'fuseki' ? 'fuseki' : game.mode === 'position' ? 'shogi' : 'tenbin'}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${normalOnly ? '-honshogi' : ''}.kif`;
-    const path = await save({ defaultPath: name, filters: [{ name: 'KIF 棋譜', extensions: ['kif', 'kifu'] }] });
+    const path = await save({ defaultPath: name, filters: [{ name: t('kif_filter'), extensions: ['kif', 'kifu'] }] });
     if (!path) return;
     await invoke('write_text_file', { path, text });
-    say(`保存しました: ${path}`);
+    say(t('msg_saved', { path }));
   }
 
   async function openKif(): Promise<void> {
     if (!isTauri()) {
-      say('棋譜を開くのは Tauri のアプリ内でだけできます', true);
+      say(t('msg_open_tauri_only'), true);
       return;
     }
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const path = await open({ multiple: false, directory: false, filters: [{ name: 'KIF 棋譜', extensions: ['kif', 'kifu', 'txt'] }] });
+    const path = await open({ multiple: false, directory: false, filters: [{ name: t('kif_filter'), extensions: ['kif', 'kifu', 'txt'] }] });
     if (typeof path !== 'string') return;
     try {
       const text = await invoke<string>('read_text_file', { path });
       loadKifText(text);
-      say(`開きました: ${path}`);
+      say(t('msg_opened', { path }));
     } catch (e) {
-      say(`棋譜を読めない: ${e instanceof Error ? e.message : String(e)}`, true);
+      say(t('msg_kif_unreadable', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }
 
@@ -737,30 +819,31 @@ async function main(): Promise<void> {
   // ---- ツールバー ----
   const toolbar = $('toolbar');
   toolbar.innerHTML = `
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>天秤将棋</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>${t('app_name')}</span></div>
     <div class="tools">
-      <button type="button" data-act="new" title="新しい対局（Ctrl+N）">${ICON.play}<span>新しい対局</span></button>
-      <button type="button" data-act="undo" title="待った・1 手戻す（Backspace）">${ICON.undo}<span>待った</span></button>
-      <button type="button" data-act="resign" title="投了">${ICON.flag}<span>投了</span></button>
-      <button type="button" data-act="pause" aria-pressed="false" title="エンジンの思考と時計を止める（Space）">${ICON.pause}<span>一時停止</span></button>
-      <button type="button" data-act="flip" title="盤面反転（F）">${ICON.flip}<span>盤面反転</span></button>
-      <button type="button" data-act="edit" title="局面編集">${ICON.edit}<span>局面編集</span></button>
-      <button type="button" data-act="open" title="棋譜を開く（Ctrl+O）。貼り付け（Ctrl+V）でも読み込めます">${ICON.open}<span>開く</span></button>
-      <button type="button" data-act="save" title="棋譜を保存（Ctrl+S）。Ctrl+C で棋譜を写します">${ICON.save}<span>保存</span></button>
+      <button type="button" data-act="new" title="${t('tb_new_title')}">${ICON.play}<span>${t('tb_new')}</span></button>
+      <button type="button" data-act="undo" title="${t('tb_undo_title')}">${ICON.undo}<span>${t('tb_undo')}</span></button>
+      <button type="button" data-act="resign" title="${t('tb_resign_title')}">${ICON.flag}<span>${t('tb_resign')}</span></button>
+      <button type="button" data-act="pause" aria-pressed="false" title="${t('tb_pause_title')}">${ICON.pause}<span>${t('tb_pause')}</span></button>
+      <button type="button" data-act="flip" title="${t('tb_flip_title')}">${ICON.flip}<span>${t('tb_flip')}</span></button>
+      <button type="button" data-act="edit" title="${t('tb_edit')}">${ICON.edit}<span>${t('tb_edit')}</span></button>
+      <button type="button" data-act="open" title="${t('tb_open_title')}">${ICON.open}<span>${t('tb_open')}</span></button>
+      <button type="button" data-act="save" title="${t('tb_save_title')}">${ICON.save}<span>${t('tb_save')}</span></button>
     </div>
     <div class="tools right">
-      <button type="button" data-act="setup" title="はじめに（エンジンの入れ方・片づけ方）">${ICON.help}<span>はじめに</span></button>
-      <button type="button" data-act="engines" title="エンジンの登録（USI ログもここから）">${ICON.sliders}<span>エンジン</span></button>
-      <button type="button" data-act="theme" title="明るさを切り替える">${ICON.theme}<span>テーマ</span></button>
+      <button type="button" data-act="setup" title="${t('tb_setup_title')}">${ICON.help}<span>${t('tb_setup')}</span></button>
+      <button type="button" data-act="engines" title="${t('tb_engines_title')}">${ICON.sliders}<span>${t('tb_engines')}</span></button>
+      <button type="button" data-act="lang" title="${t('tb_lang_title')}" lang="${lang() === 'ja' ? 'en' : 'ja'}">${ICON.lang}<span>${t('tb_lang')}</span></button>
+      <button type="button" data-act="theme" title="${t('tb_theme_title')}">${ICON.theme}<span>${t('tb_theme')}</span></button>
     </div>`;
   const saveMenu = document.createElement('dialog');
   saveMenu.className = 'save-dialog';
   saveMenu.innerHTML = `
     <form method="dialog" class="dialog-body">
-      <div class="dialog-head"><h2>棋譜を保存</h2></div>
-      <button type="button" data-save="all" class="save-choice"><strong>対局全体（布石を含む）</strong><span>このアプリで開ける KIF。布石の手と先後の選択も残る</span></button>
-      <button type="button" data-save="normal" class="save-choice"><strong>本将棋の部分だけ</strong><span>41手目の局面図から始まる普通の KIF。将棋所や ShogiHome で開ける</span></button>
-      <div class="dialog-actions"><button type="submit">やめる</button></div>
+      <div class="dialog-head"><h2>${t('save_title')}</h2></div>
+      <button type="button" data-save="all" class="save-choice"><strong>${t('save_all')}</strong><span>${t('save_all_sub')}</span></button>
+      <button type="button" data-save="normal" class="save-choice"><strong>${t('save_normal')}</strong><span>${t('save_normal_sub')}</span></button>
+      <div class="dialog-actions"><button type="submit">${t('cancel')}</button></div>
     </form>`;
   $('dialogs').appendChild(saveMenu);
   saveMenu.addEventListener('click', (e) => {
@@ -781,9 +864,19 @@ async function main(): Promise<void> {
       case 'undo':
         undo();
         break;
-      case 'resign':
-        if (cursor === null && !editor && game.phase !== 'over' && confirm(`${colorName(game.turn)}が投了しますか`)) tryApply('resign');
+      case 'resign': {
+        if (cursor !== null || editor || game.phase === 'over') break;
+        // 投げるのは押した本人。手番から決めると、相手の手番で一時停止して押したときに
+        // 相手が投げたことになってしまうので、席から色を決める
+        const loser = resignColor();
+        if (loser === null) {
+          // 案内は次の描き直しで消えてしまうので、押した本人に届く形で出す
+          alert(t('alert_not_your_turn'));
+          break;
+        }
+        if (confirm(t('confirm_resign', { side: sideName(loser) }))) tryApply('resign', loser);
         break;
+      }
       case 'flip':
         flipBoard();
         break;
@@ -810,6 +903,18 @@ async function main(): Promise<void> {
       case 'engines':
         engineDialog.open();
         break;
+      case 'lang': {
+        // 言葉を変えたら窓ごと読み込み直す。検討の枠はエンジンを抱えていて組み立て直せないので、
+        // 作り直すほうが確か（beforeunload が閉じるときと同じ後始末をする）
+        const next: Lang = lang() === 'ja' ? 'en' : 'ja';
+        if (game.moves.length > 0 && game.phase !== 'over' && !confirm(t('confirm_lang'))) break;
+        settings.lang = next;
+        void (async () => {
+          await saveSettings(settings);
+          location.reload();
+        })();
+        break;
+      }
       case 'theme': {
         // 明るいと暗いの 2 つだけ。'system' は古い設定の受け皿として型に残してある
         const order: Settings['theme'][] = ['light', 'dark'];
@@ -831,26 +936,26 @@ async function main(): Promise<void> {
   /** 棋譜を写す（Ctrl+C）。貼り付けはこのアプリ同士でも将棋所などとも行き来できる */
   async function copyKif(): Promise<void> {
     if (game.moves.length === 0) {
-      say('棋譜がまだありません', true);
+      say(t('msg_no_kifu'), true);
       return;
     }
     try {
       await navigator.clipboard.writeText(writeKif(game, kifMeta()));
-      say('棋譜を写しました（Ctrl+V で他のソフトへ貼れます）');
+      say(t('msg_copied'));
     } catch (e) {
-      say(`棋譜を写せません: ${e instanceof Error ? e.message : String(e)}`, true);
+      say(t('msg_copy_failed', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }
 
   /** 貼り付けた文字を棋譜として読む（Ctrl+V） */
   function pasteKif(text: string): void {
     if (!text.trim()) return;
-    if (game.moves.length > 0 && game.phase !== 'over' && !confirm('いまの対局を捨てて、貼り付けた棋譜を開きますか')) return;
+    if (game.moves.length > 0 && game.phase !== 'over' && !confirm(t('confirm_paste'))) return;
     try {
       loadKifText(text);
-      say(`貼り付けた棋譜を開きました（${game.moves.length} 手）`);
+      say(t('msg_pasted', { n: game.moves.length }));
     } catch (e) {
-      say(`棋譜として読めません: ${e instanceof Error ? e.message : String(e)}`, true);
+      say(t('msg_paste_unreadable', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }
 
@@ -901,7 +1006,7 @@ async function main(): Promise<void> {
       case ' ':
         // ボタンに焦点があるときの Space はそのボタンを押す操作。二重に効かせない
         if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return;
-        if (!driver.active) return;
+        if (!driver.active || game.phase === 'over') return; // ボタンと同じ条件。終局後に止めても再開できない
         e.preventDefault();
         void togglePause();
         return;
@@ -945,18 +1050,28 @@ async function main(): Promise<void> {
   };
 
   paintAll();
-  // 初回だけ、はじめの案内を出す（エンジンが 1 本も無いとき）
-  if (!settings.seenSetup && settings.engines.length === 0) {
+  if (settingsLoadError) {
+    // 読めなかった設定を既定値で上書きしない。保存すると前の登録が消えるので、まず知らせる
+    say(t('msg_settings_broken', { msg: settingsLoadError }), true);
+  } else if (!settings.seenSetup && settings.engines.length === 0) {
+    // 初回だけ、はじめの案内を出す（エンジンが 1 本も無いとき）
     settings.seenSetup = true;
     void saveSettings(settings);
     void setupDialog.open();
   }
-  // 新しい版が出ていれば知らせる（承諾したときだけ入れ替える）
-  void checkUpdate(true, { say: (text, error) => say(text, error) });
+  // 新しい版が出ていれば知らせる（承諾したときだけ入れ替える）。入れ替えの前にエンジンを全部止める。
+  // 入れ替えは窓を閉じずにプロセスを終えるので、ここで止めないとやねうら王が残る
+  const updateDeps = {
+    say: (text: string, error?: boolean) => say(text, error),
+    beforeInstall: async () => {
+      await Promise.all([analysis.shutdown(), driver.shutdown(), kifuAnalyzer.shutdown()]);
+    },
+  };
+  void checkUpdate(true, updateDeps);
   builtin = await loadBuiltin((t) => usiConsole.append('sys', t));
   analysis.refreshEngineList();
   if (!isTauri()) {
-    usiConsole.append('sys', 'ブラウザのプレビューです。盤と棋譜は動きますが、エンジンや棋譜のファイルは Tauri のアプリ内でだけ扱えます。');
+    usiConsole.append('sys', t('msg_preview'));
   }
 }
 
@@ -984,12 +1099,13 @@ const ICON = {
   layout: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M2.5 3.5h15v13h-15zM2.5 8h15M9 8v8.5M14 8v8.5"/></svg>',
   help: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="7.5"/><path d="M7.8 7.6a2.3 2.3 0 1 1 2.6 2.6v1.4"/><circle cx="10.2" cy="14.4" r="0.9" fill="currentColor" stroke="none"/></svg>',
   theme: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="5.5"/><path d="M10 4.5v11A5.5 5.5 0 0 0 10 4.5z" fill="currentColor"/></svg>',
+  lang: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15"/><path d="M10 2.5c2.2 2.2 3.2 4.8 3.2 7.5S12.2 15.3 10 17.5C7.8 15.3 6.8 12.7 6.8 10S7.8 4.7 10 2.5z"/></svg>',
 };
 
 main().catch((e) => {
   const s = document.getElementById('status');
   if (s) {
-    s.textContent = `起動できない: ${e instanceof Error ? e.message : String(e)}`;
+    s.textContent = t('msg_boot_failed', { msg: e instanceof Error ? e.message : String(e) });
     s.classList.add('error');
   }
   console.error(e);

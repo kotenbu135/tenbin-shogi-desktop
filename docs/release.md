@@ -24,7 +24,7 @@
 ## 踏んだ罠
 
 - MSI（WiX）は productName が日本語だと `light.exe` が落ちる → `--bundles nsis` だけ作る
-- GitHub は資産名から日本語を落とす（`天秤将棋_…` → `_…`）。tauri-action の `includeUpdaterJson`
+- GitHub は資産名から日本語を落とす（`天秤将棋GUI_…` → `GUI_…`。ワークフローが消す）。tauri-action の `includeUpdaterJson`
   では署名を見つけられないので、`latest.json` はワークフローの中で自分で組み立てる
 - ビルドの成果物はワークスペースの根の `target/`（`src-tauri/target` ではない）
 - `set -o pipefail` の下で `ls A B` は片方が無いと落ちる → `find` で探す
@@ -36,6 +36,7 @@ npm run build && npm run preview          # http://localhost:4173
 node scripts/smoke-preview.mjs /tmp       # 両玉→布石→本将棋→待った
 node scripts/smoke-builtin.mjs /tmp       # 内蔵の布石評価・複数枠の検討・内蔵同士の自動対局
 node scripts/smoke-review.mjs /tmp        # 割りつけ・対局の枠・2 種のグラフ・終局後の検討・棋譜解析
+node scripts/smoke-en.mjs                # 英語表示（日本語の残りが無いか・KIF は日本語のまま・切り替え）
 WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 npm run tauri dev   # 別の端末で
 node scripts/drive-app.mjs /tmp           # 動いているアプリを操作する（Linux/WebKitGTK 向け）
 node scripts/drive-engines.mjs /tmp <エンジン>

@@ -7,10 +7,11 @@
 // 評価はここで「先手の勝率」に直してから外へ渡す（グラフと同じ目盛り）。cp もこの表では先手から見た値に
 // そろえる（勝率の列と符号が食い違わないように）。そのエンジンの目盛りのまま添える。
 
+import { lang, t as tr } from '../i18n.ts';
 import type { EngineConfig, EngineState, Thinker } from '../usi/engine.ts';
 import { cpToP, pToCp } from '../usi/evalscale.ts';
 import type { UsiInfo } from '../usi/parse.ts';
-import type { Color, Phase } from '../state/game.ts';
+import type { Color, Mode, Phase } from '../state/game.ts';
 import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
 import { MAX_SCORE, type EvalSource } from './graph.ts';
 
@@ -56,6 +57,8 @@ export interface Target {
   stage: 'kings' | 'choose' | 'fuseki' | 'normal';
   turn: Color;
   ply: number;
+  /** 対局のルール。内蔵の評価が 1〜2 手目を玉置きと扱うかを決める */
+  mode: Mode;
 }
 
 /** info 1 行を先手の勝率と先手から見た cp・詰みに直す。評価の無い行（string だけなど）は null */
@@ -93,6 +96,11 @@ export function evalOfInfo(info: UsiInfo, eval_: EngineConfig['eval'], turn: Col
 
 /** 大きな数を短く（欄が狭いので、見出しが切れないように）。1万 以上は 万・億 で */
 function bigNum(n: number): string {
+  if (lang() === 'en') {
+    if (n < 10000) return n.toLocaleString('en-US');
+    if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`;
+    return `${(n / 1e6).toFixed(2)}M`;
+  }
   if (n < 10000) return n.toLocaleString('ja-JP');
   if (n < 1e8) return `${(n / 1e4).toFixed(1)}万`;
   return `${(n / 1e8).toFixed(2)}億`;
@@ -133,8 +141,8 @@ class Slot {
       <div class="analysis-notice" hidden></div>
       <div class="analysis-table"></div>`
       : `<div class="aslot-head">
-        <select class="engine-select" aria-label="この枠のエンジン"></select>
-        <button type="button" class="link aslot-remove" title="この枠を外す" aria-label="この枠を外す">×</button>
+        <select class="engine-select" aria-label="${tr('an_slot_engine')}"></select>
+        <button type="button" class="link aslot-remove" title="${tr('an_slot_remove')}" aria-label="${tr('an_slot_remove')}">×</button>
       </div>
       <div class="analysis-status"><span class="engine-name"></span><span class="engine-stats"></span></div>
       <div class="analysis-notice" hidden></div>
@@ -161,15 +169,15 @@ class Slot {
     let th = this.pool.get(id) ?? null;
     if (!th) {
       th = deps.createThinker(id, `analysis${this.index}`);
-      if (!th) throw new Error('エンジンが見つからない');
+      if (!th) throw new Error(tr('an_engine_missing'));
       th.onLog = (dir, text) => deps.onLog(th!.config.name || th!.config.path, dir, text);
       th.onStateChange = () => this.paintState();
       this.pool.set(id, th);
     }
     if (this.thinker && this.thinker !== th) await this.thinker.stop();
     this.thinker = th;
-    if (th.state === 'stopped') {
-      this.name.textContent = '起動中…';
+    if (th.state === 'stopped' || th.state === 'starting') {
+      this.name.textContent = tr('an_starting');
       await th.start();
     }
     return th;
@@ -214,7 +222,7 @@ class Slot {
   tickTime(): void {
     if (!this.running || !this.startedAt) return;
     const el = this.root.querySelector('.think-time');
-    if (el) el.textContent = `${((performance.now() - this.startedAt) / 1000).toFixed(1)} 秒`;
+    if (el) el.textContent = tr('an_seconds', { sec: ((performance.now() - this.startedAt) / 1000).toFixed(1) });
   }
 
   paintState(): void {
@@ -222,7 +230,12 @@ class Slot {
     const st: EngineState = this.thinker?.state ?? 'stopped';
     // 登録名を出す。id name は長い（版や CPU の種別が付く）ので title に回す
     const name = this.thinker?.config.name || this.thinker?.idName || '';
-    const label: Record<EngineState, string> = { stopped: '停止', starting: '起動中', ready: '待機', thinking: '思考中' };
+    const label: Record<EngineState, string> = {
+      stopped: tr('an_state_stopped'),
+      starting: tr('an_state_starting'),
+      ready: tr('an_state_ready'),
+      thinking: tr('an_state_thinking'),
+    };
     this.name.textContent = name ? `${name} · ${label[st]}` : '';
     this.name.title = this.thinker?.idName ?? '';
     if (!this.running) this.stats.textContent = '';
@@ -274,26 +287,26 @@ class Slot {
     if (top && t && t.stage !== 'normal') {
       // 布石中の数字は価値ネットの推定。深さやノード数に意味は無いので、代わりに当てにできる度合いを出す。
       // held-out の AUC は 1〜17 手目で 0.62〜0.65、18 手目から 0.69、30 手目以降で 0.76〜0.78（iter1400 以降）。
-      const trust = t.ply < 18 ? '序盤の数字は当てにならない' : t.ply < 30 ? '中盤の数字は目安' : '終盤の数字はおおむね当たる';
-      this.stats.textContent = t.stage === 'kings' ? '両玉の価値表 · 実対局の勝率' : `布石の価値ネット · ${trust}`;
+      const trust = tr(t.ply < 18 ? 'an_trust_early' : t.ply < 30 ? 'an_trust_mid' : 'an_trust_late');
+      this.stats.textContent = t.stage === 'kings' ? tr('an_kings_table') : tr('an_value_net', { trust });
     } else if (top) {
       // ShogiHome の見出しと同じ並び: ノード数 · NPS · Hash 使用率 · 経過時間
       const parts: string[] = [];
-      if (top.nodes !== null) parts.push(`${bigNum(top.nodes)} ノード`);
+      if (top.nodes !== null) parts.push(tr('an_nodes', { n: bigNum(top.nodes) }));
       if (top.nps !== null) parts.push(`${bigNum(top.nps)} NPS`);
       if (this.hashfull !== null) parts.push(`Hash ${(this.hashfull / 10).toFixed(1)}%`);
-      if (top.time !== null) parts.push(`${(top.time / 1000).toFixed(1)} 秒`);
+      if (top.time !== null) parts.push(tr('an_seconds', { sec: (top.time / 1000).toFixed(1) }));
       this.stats.textContent = parts.join(' · ');
     }
     if (!t || lines.length === 0) {
       this.table.innerHTML = this.running
-        ? '<div class="analysis-empty">読み筋を待っています…</div>'
+        ? `<div class="analysis-empty">${tr('an_waiting_pv')}</div>`
         : this.player
           ? // 人の側は見出しに「人が指します」と出ているので、ここでは繰り返さない
             this.human
             ? ''
-            : '<div class="analysis-empty">エンジンが考え始めると、読み筋がここに出ます。</div>'
-          : '<div class="analysis-empty">検討を始めると、候補手・評価値・期待勝率がここに並びます。</div>';
+            : `<div class="analysis-empty">${tr('an_player_empty')}</div>`
+          : `<div class="analysis-empty">${tr('an_empty')}</div>`;
       return;
     }
     // 列は ShogiHome と同じ 順位 / 深さ / Node数 / 評価値 に、期待勝率 を足して 読み筋。
@@ -304,31 +317,31 @@ class Slot {
     table.className = 'cand-table';
     // Node数 の列は置かない。行ごとに同じ数で、見出しの行にも出ている（狭い欄で読み筋を潰さない）
     table.innerHTML =
-      '<thead><tr><th class="c-rank">順位</th>' +
-      (fuseki ? '' : '<th class="c-depth">深さ</th>') +
-      '<th class="c-score">評価値</th><th class="c-p">期待勝率</th><th class="c-pv">読み筋</th></tr></thead>';
+      `<thead><tr><th class="c-rank">${tr('an_col_rank')}</th>` +
+      (fuseki ? '' : `<th class="c-depth">${tr('an_col_depth')}</th>`) +
+      `<th class="c-score">${tr('an_col_score')}</th><th class="c-p">${tr('an_col_p')}</th><th class="c-pv">${tr('an_col_pv')}</th></tr></thead>`;
     const body = document.createElement('tbody');
     for (const l of lines) {
       const pv = this.panel.pvText(l.pv, t);
       const move = pv[0] ?? '—';
       const scoreText =
         l.mate !== null
-          ? `${l.mate > 0 ? '+' : '-'}${Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate)}詰`
+          ? tr('an_mate', { sign: l.mate > 0 ? '+' : '-', n: Math.abs(l.mate) === 999 ? '' : Math.abs(l.mate) })
           : l.cp !== null
             ? `${l.approx ? '≈' : ''}${l.cp > 0 ? '+' : ''}${l.cp}`
             : '—';
       const depth = l.depth === null ? '—' : `${l.depth}${l.seldepth !== null ? '/' + l.seldepth : ''}`;
       const pct = (l.pSente * 100).toFixed(1);
-      const tr = document.createElement('tr');
-      tr.className = 'cand';
-      tr.innerHTML = `
+      const row = document.createElement('tr');
+      row.className = 'cand';
+      row.innerHTML = `
         <td class="c-rank">${l.multipv}</td>
         ${fuseki ? '' : `<td class="c-depth">${escapeHtml(depth)}</td>`}
-        <td class="c-score${l.approx ? ' approx' : ''}"${l.approx ? ' title="このエンジンは評価値を出さない。勝率から換算した目安"' : ''}>${escapeHtml(scoreText)}</td>
+        <td class="c-score${l.approx ? ' approx' : ''}"${l.approx ? ` title="${tr('an_approx_title')}"` : ''}>${escapeHtml(scoreText)}</td>
         <td class="c-p"><span class="bar" style="--p:${pct}%"><i></i></span><span class="num">${pct}%</span></td>
         <td class="c-pv"><span class="move">${escapeHtml(move)}</span> <span class="rest">${escapeHtml(pv.slice(1, 24).join(' '))}</span></td>`;
-      tr.querySelector('.c-pv')!.setAttribute('title', pv.join(' '));
-      body.appendChild(tr);
+      row.querySelector('.c-pv')!.setAttribute('title', pv.join(' '));
+      body.appendChild(row);
     }
     table.appendChild(body);
     this.table.replaceChildren(table);
@@ -337,6 +350,7 @@ class Slot {
 
 export class AnalysisPanel {
   private slots: Slot[] = [];
+  private nextSlotIndex = 0;
   private players = new Map<0 | 1, Slot>();
   private target: Target | null = null;
   private running = false;
@@ -353,11 +367,11 @@ export class AnalysisPanel {
   constructor(private readonly root: HTMLElement, private readonly playRoot: HTMLElement, private readonly deps: AnalysisDeps) {
     playRoot.innerHTML = `
       <div class="analysis-head play-head">
-        <span class="play-title">対局中のエンジンの読み</span>
-        <label class="multipv" title="対局中のエンジンに送る MultiPV。増やすと候補が並ぶが、読みは少し落ちる"><span>候補</span><input type="number" min="1" max="10" value="${deps.settings().playMultiPv}" /></label>
+        <span class="play-title">${tr('an_play_title')}</span>
+        <label class="multipv" title="${tr('an_play_multipv_title')}"><span>${tr('an_candidates')}</span><input type="number" min="1" max="10" value="${deps.settings().playMultiPv}" /></label>
       </div>
       <div class="play-slots"></div>
-      <div class="play-empty">対局を始めると、先手と後手の候補手がここに並びます。</div>`;
+      <div class="play-empty">${tr('an_play_empty')}</div>`;
     this.playersEl = playRoot.querySelector('.play-slots')!;
     this.playEmpty = playRoot.querySelector('.play-empty')!;
     const playPv = playRoot.querySelector<HTMLInputElement>('.play-head .multipv input')!;
@@ -370,10 +384,10 @@ export class AnalysisPanel {
     });
     root.innerHTML = `
       <div class="analysis-head">
-        <button type="button" class="primary" data-act="toggle">検討を始める</button>
-        <label class="multipv" title="候補の数（MultiPV）"><span>候補</span><input type="number" min="1" max="20" value="${deps.settings().analysisMultiPv}" /></label>
-        <button type="button" class="link" data-act="add" title="もう 1 本のエンジンで同じ局面を検討する">＋ エンジンを足す</button>
-        <button type="button" class="link" data-act="kifu" title="棋譜の各局面を順に評価してグラフに入れる">棋譜解析</button>
+        <button type="button" class="primary" data-act="toggle">${tr('an_start')}</button>
+        <label class="multipv" title="${tr('an_multipv_title')}"><span>${tr('an_candidates')}</span><input type="number" min="1" max="20" value="${deps.settings().analysisMultiPv}" /></label>
+        <button type="button" class="link" data-act="add" title="${tr('an_add_engine_title')}">${tr('an_add_engine')}</button>
+        <button type="button" class="link" data-act="kifu" title="${tr('an_kifu_title')}">${tr('an_kifu_btn')}</button>
       </div>
       <div class="analysis-notice panel-notice" hidden></div>
       <div class="analysis-progress" hidden></div>
@@ -440,7 +454,12 @@ export class AnalysisPanel {
       const s = this.playerSlot(seat);
       s.human = side.human;
       // 人が指す側にエンジン名は出さない（布石だけエンジンに任せた席で名前が残らないように）
-      if (!s.running) s.setPlayer(side.label, side.human ? '人が指します' : s.playerCfg ? '待機' : 'エンジンが考えます', side.human ? null : s.playerCfg);
+      if (!s.running)
+        s.setPlayer(
+          side.label,
+          side.human ? tr('an_human_plays') : s.playerCfg ? tr('an_state_ready') : tr('an_engine_thinks'),
+          side.human ? null : s.playerCfg,
+        );
       if (!s.running) s.paintTable(s.playerTarget);
     }
   }
@@ -468,7 +487,7 @@ export class AnalysisPanel {
     s.hashfull = null;
     s.running = true;
     s.startedAt = performance.now();
-    s.setPlayer(label, '思考中', cfg);
+    s.setPlayer(label, tr('an_state_thinking'), cfg);
     s.paintTable(t);
     this.startTicking();
   }
@@ -480,7 +499,7 @@ export class AnalysisPanel {
   }
 
   /** 指した（または中断した）。読みは残す */
-  endPlayer(seat: 0 | 1, state = '指した'): void {
+  endPlayer(seat: 0 | 1, state = tr('th_moved')): void {
     const s = this.players.get(seat);
     if (!s) return;
     s.running = false;
@@ -528,7 +547,7 @@ export class AnalysisPanel {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'link';
-      b.textContent = '止める';
+      b.textContent = tr('an_stop_btn');
       b.addEventListener('click', onStop);
       this.progress.append(' ', b);
     }
@@ -538,7 +557,8 @@ export class AnalysisPanel {
 
   private addSlot(id: string, persist = true): void {
     if (this.slots.length >= MAX_SLOTS) return;
-    const s = new Slot(this.slots.length, this);
+    // 番号は使い回さない。消した枠のエンジンが残っている間に同じ番号を振ると、プロセス id がぶつかる
+    const s = new Slot(this.nextSlotIndex++, this);
     s.engineId = id;
     this.slots.push(s);
     this.slotsEl.appendChild(s.root);
@@ -552,7 +572,6 @@ export class AnalysisPanel {
     this.slots = this.slots.filter((x) => x !== s);
     s.root.remove();
     await s.quitAll();
-    this.slots.forEach((x, i) => ((x as { index: number }).index = i));
     this.persistSlots();
     this.refreshEngineList();
   }
@@ -579,9 +598,9 @@ export class AnalysisPanel {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'link';
-      b.textContent = 'エンジンを登録する';
+      b.textContent = tr('an_register_engine');
       b.addEventListener('click', () => this.deps.openEngineSettings());
-      this.notice.append('布石は内蔵の評価で検討できます。41 手目以降には USI エンジンが要ります。', b);
+      this.notice.append(tr('an_need_engine'), b);
     }
     for (const s of this.slots) {
       const sel = s.select!;
@@ -593,8 +612,8 @@ export class AnalysisPanel {
         o.textContent = text;
         sel.appendChild(o);
       };
-      add(AUTO, '自動（布石は内蔵、41手目から既定のエンジン）');
-      add(BUILTIN_ID, '内蔵の布石評価');
+      add(AUTO, tr('an_auto'));
+      add(BUILTIN_ID, tr('bi_name'));
       for (const e of st.engines) add(e.id, e.name || e.path);
       sel.value = cur === AUTO || cur === BUILTIN_ID || st.engines.some((e) => e.id === cur) ? cur : AUTO;
       s.engineId = sel.value;
@@ -603,16 +622,19 @@ export class AnalysisPanel {
   }
 
   private canAnalyze(cfg: EngineConfig, t: Target): string | null {
-    if (t.stage === 'choose') return '先手か後手かを選ぶと検討できます。';
-    if (t.stage !== 'normal' && cfg.kind !== 'fuseki') return '布石中はこのエンジンでは評価できません。布石対応のエンジンか内蔵の評価を選んでください。';
-    if (t.stage === 'normal' && cfg.id === BUILTIN_ID) return '内蔵の評価は布石だけです。41 手目からは本将棋のエンジンを使います。';
+    if (t.stage === 'choose') return tr('an_cannot_choose');
+    if (t.stage !== 'normal' && cfg.kind !== 'fuseki') return tr('an_cannot_fuseki');
+    if (t.stage === 'normal' && cfg.id === BUILTIN_ID) return tr('an_cannot_normal');
     return null;
   }
 
   /** 表示中の局面が変わったら呼ぶ。検討中なら新しい局面で続ける。 */
   async setTarget(t: Target): Promise<void> {
     // 先後の選択は position に出ないので、局面の文字列だけでは区別できない。段階も見る
-    const same = this.target?.positionCmd === t.positionCmd && this.target?.stage === t.stage;
+    // ルール（天秤将棋 / 布石将棋）も position に出ない。最初の 2 手が同じ玉打ちだと
+    // 文字列も段階も一致してしまうので、規則が変わったら検討を入れ替える
+    const same =
+      this.target?.positionCmd === t.positionCmd && this.target?.stage === t.stage && this.target?.mode === t.mode;
     this.target = t;
     if (this.running && !same) await this.restartAll();
     else for (const s of this.slots) s.paintState();
@@ -637,7 +659,7 @@ export class AnalysisPanel {
     if (!id) {
       await s.thinker?.stop();
       s.running = false;
-      s.showNotice(t.stage === 'normal' ? '41 手目以降の既定エンジンがありません。エンジンを登録してください。' : '布石を検討するものがありません。');
+      s.showNotice(tr(t.stage === 'normal' ? 'an_no_normal_engine' : 'an_no_fuseki_engine'));
       s.paintState();
       return;
     }
@@ -665,6 +687,7 @@ export class AnalysisPanel {
       s.hashfull = null;
       s.paintTable(t);
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', st.analysisMultiPv);
+      if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', t.mode === 'tenbin' ? 'tenbin' : 'fuseki');
       const primary = this.slots[0] === s;
       await th.goInfinite(t.positionCmd, (info) => {
         // 同じ局面で setTarget が重なると target の実体が入れ替わる。局面が同じなら受ける
@@ -701,7 +724,7 @@ export class AnalysisPanel {
   }
 
   private paintHead(): void {
-    this.toggle.textContent = this.running ? '検討を止める' : '検討を始める';
+    this.toggle.textContent = tr(this.running ? 'an_stop' : 'an_start');
     this.toggle.classList.toggle('primary', !this.running);
   }
 }

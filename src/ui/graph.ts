@@ -37,16 +37,19 @@ export interface GraphInput {
 
 export const MAX_SCORE = 2000;
 
+import { t, type Key } from '../i18n.ts';
+
 const PAD_L = 46;
 const PAD_R = 14;
 /** 折れ線を描く枠の上端。凡例はこの上の余白に置く（布石・本将棋の見出しと重ならないように） */
 const TOP = 20;
 const PAD_B = 22;
 
-const SERIES: { key: EvalSource; label: string }[] = [
-  { key: 'sente', label: '☗先手' },
-  { key: 'gote', label: '☖後手' },
-  { key: 'analysis', label: '検討' },
+// 凡例の文言は描くときに引く（言語の設定は起動の途中で決まるので、読み込み時には固めない）
+const SERIES: { key: EvalSource; label: Key }[] = [
+  { key: 'sente', label: 'graph_series_sente' },
+  { key: 'gote', label: 'graph_series_gote' },
+  { key: 'analysis', label: 'graph_series_analysis' },
 ];
 
 export class TenbinGraph {
@@ -99,7 +102,7 @@ export class TenbinGraph {
       const d = pts.map((pt, i) => `${i ? 'L' : 'M'}${x(pt.ply).toFixed(1)},${yOf(pt).toFixed(1)}`).join(' ');
       return {
         key,
-        label,
+        label: t(label),
         n: pts.length,
         path: d ? `<path class="line ${key}" d="${d}" />` : '',
         dots: pts
@@ -113,7 +116,7 @@ export class TenbinGraph {
 
     // 手数の目盛り。10手ごと、布石の終わりは必ず入れる
     const ticks: number[] = [];
-    for (let t = 0; t <= maxPly; t += 10) ticks.push(t);
+    for (let p = 0; p <= maxPly; p += 10) ticks.push(p);
     if (fusekiEnd > 0 && !ticks.includes(fusekiEnd)) ticks.push(fusekiEnd);
 
     // 縦軸。評価値は ±2000 を 1000 刻み、勝率は 0/50/100%
@@ -130,24 +133,24 @@ export class TenbinGraph {
     const cpText = cur === null || cur.cp === null ? null : `${cur.approx ? '≈' : ''}${cur.cp > 0 ? '+' : ''}${cur.cp}`;
     const pText = cur === null ? null : `${(cur.p * 100).toFixed(1)}%`;
     const both = score ? [cpText, pText] : [pText, cpText];
-    const curLabel = cur === null ? '' : `先手 ${both.filter((v) => v !== null).join(' · ')}`;
+    const curLabel = cur === null ? '' : t('graph_current', { v: both.filter((v) => v !== null).join(' · ') });
     const cx = x(input.ply);
     const labelRight = cx < W - 130;
     const legend = series.filter((s) => s.n > 0).map((s) => `<tspan class="lg ${s.key}">━</tspan> ${s.label}`);
-    if (approx) legend.push('<tspan class="lg approx">○</tspan> 勝率からの換算');
+    if (approx) legend.push(`<tspan class="lg approx">○</tspan> ${t('graph_approx')}`);
     // 狭い欄では凡例を畳む（線の色だけで読める）
     const showLegend = legend.length > 0 && W > 380;
 
     this.root.innerHTML = `
-<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="tenbin" aria-label="${score ? '評価値' : '期待勝率'}のグラフ" role="img">
+<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="tenbin" aria-label="${t('graph_title', { kind: t(score ? 'graph_score' : 'graph_winrate') })}" role="img">
   ${fusekiEnd > 0 ? `<rect class="band fuseki" x="${x(0)}" y="${TOP}" width="${x(fusekiEnd) - x(0)}" height="${BOTTOM - TOP}" />` : ''}
   ${rows.map((r) => `<line class="${r.mid ? 'mid' : 'grid'}" x1="${x(0)}" y1="${r.y.toFixed(1)}" x2="${x(maxPly)}" y2="${r.y.toFixed(1)}" />`).join('')}
   <line class="axis-line" x1="${x(0)}" y1="${TOP}" x2="${x(0)}" y2="${BOTTOM}" />
   <line class="axis-line" x1="${x(0)}" y1="${BOTTOM}" x2="${x(maxPly)}" y2="${BOTTOM}" />
   ${fusekiEnd > 0 ? `<line class="edge" x1="${x(fusekiEnd)}" y1="${TOP}" x2="${x(fusekiEnd)}" y2="${BOTTOM}" />` : ''}
   ${rows.map((r) => `<text class="axis" x="${x(0) - 6}" y="${(r.y + 4).toFixed(1)}" text-anchor="end">${r.text}</text>`).join('')}
-  ${ticks.map((t) => `<text class="axis" x="${x(t).toFixed(1)}" y="${BOTTOM + 14}" text-anchor="middle">${t}</text>`).join('')}
-  ${fusekiEnd > 0 ? `<text class="axis label" x="${x(fusekiEnd / 2).toFixed(1)}" y="${TOP + 12}" text-anchor="middle">布石</text><text class="axis label" x="${(x(fusekiEnd) + 6).toFixed(1)}" y="${TOP + 12}">本将棋</text>` : ''}
+  ${ticks.map((p) => `<text class="axis" x="${x(p).toFixed(1)}" y="${BOTTOM + 14}" text-anchor="middle">${p}</text>`).join('')}
+  ${fusekiEnd > 0 ? `<text class="axis label" x="${x(fusekiEnd / 2).toFixed(1)}" y="${TOP + 12}" text-anchor="middle">${t('phase_fuseki')}</text><text class="axis label" x="${(x(fusekiEnd) + 6).toFixed(1)}" y="${TOP + 12}">${t('phase_normal')}</text>` : ''}
   ${showLegend ? `<text class="axis legend" x="${W - PAD_R}" y="13" text-anchor="end">${legend.join('　')}</text>` : ''}
   ${series.map((s) => s.path).join('')}${series.map((s) => s.dots).join('')}
   <line class="cursor" x1="${cx.toFixed(1)}" y1="${TOP}" x2="${cx.toFixed(1)}" y2="${BOTTOM}" />
