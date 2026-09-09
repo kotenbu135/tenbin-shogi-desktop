@@ -15,6 +15,7 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 page.on('dialog', (d) => d.accept());
 await page.goto('http://localhost:4173/', { waitUntil: 'networkidle0' });
+await page.evaluate(() => document.querySelector('.setup-dialog')?.close());
 await page.waitForFunction(() => document.querySelector('#status')?.textContent?.includes('玉'), { timeout: 10000 });
 const status = () => page.$eval('#status', (e) => e.textContent);
 const ev = (fn, ...args) => page.evaluate(fn, ...args);

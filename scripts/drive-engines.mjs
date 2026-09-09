@@ -28,6 +28,8 @@ const evAsync = async (body, timeoutMs = 60000) => {
 const shot = async (name) => { try { const r = await call('Page.snapshotRect', { x: 0, y: 0, width: 1360, height: 860, coordinateSystem: 'Viewport' }); fs.writeFileSync(name, Buffer.from(r.dataURL.split(',')[1], 'base64')); console.log('shot', name); } catch (e) { console.log('snapshot failed:', e.message.slice(0, 200)); } };
 const status = () => ev('document.getElementById("status").textContent');
 const openAnalysisTab = async () => { await ev('document.querySelector(".tab[data-tab=\'analysis\']")?.click()'); await sleep(150); };
+// はじめの案内が開いていたら閉じる（初回の起動で自動的に出る）
+await ev('document.querySelector(".setup-dialog")?.close()');
 const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'missing '+${JSON.stringify(sel)}; e.click(); return 'ok'})()`);
 
 for (let t = 0; t < 120; t++) { if (await ev('!!(window.tenbin && window.tenbin.builtin && window.tenbin.builtin())')) break; await sleep(500); }

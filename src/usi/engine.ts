@@ -228,6 +228,9 @@ export class UsiEngine implements Thinker {
         return;
       }
       this.expecting = false;
+      // ここで「思考中」を解く。go() の finally を待つと 1 タスク遅れ、そのあいだの stop() が
+      // 探索の終わったエンジンへ余計な stop を送ってしまう（返ってくる bestmove が次の go に混ざる）
+      if (this.state === 'thinking') this.setState('ready');
     }
     for (const w of this.waiters.slice()) {
       if (w.match(line)) {

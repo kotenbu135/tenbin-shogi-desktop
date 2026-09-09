@@ -29,6 +29,8 @@ console.log('engine select:', await ev('[...document.querySelectorAll(".engine-s
 await shot(`${OUT}/app-start.png`);
 // 両玉→選択→布石38手
 const openAnalysisTab = async () => { await ev('document.querySelector(".tab[data-tab=\'analysis\']")?.click()'); await sleep(150); };
+// はじめの案内が開いていたら閉じる（初回の起動で自動的に出る）
+await ev('document.querySelector(".setup-dialog")?.close()');
 const step = async (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'missing '+${JSON.stringify(sel)}; e.click(); return 'ok'})()`);
 console.log(await step('.stand-pieces[data-color="sente"] .slot[data-role="king"]'), await step('.cell[data-sq="5i"]'));
 console.log(await step('.stand-pieces[data-color="gote"] .slot[data-role="king"]'), await step('.cell[data-sq="5a"]'));

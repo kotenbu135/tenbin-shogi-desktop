@@ -23,6 +23,8 @@ const click = async (sel) => { const h = await page.$(sel); if (!h) throw new Er
 
 // 1. 内蔵の評価が読めた
 await page.waitForFunction(() => window.tenbin?.builtin?.(), { timeout: 30000 });
+// はじめの案内が開いていたら閉じる（初回の起動で自動的に出る）
+await page.evaluate(() => document.querySelector('.setup-dialog')?.close());
 console.log('内蔵:', await ev(() => { const b = window.tenbin.builtin(); return `${b.manifest.generation} kings=${!!b.kings}`; }));
 
 // 2. 天秤将棋の 1 手目を内蔵で検討（両玉の価値表）
