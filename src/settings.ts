@@ -17,6 +17,8 @@ export interface Settings {
   fusekiEngineId: string;
   /** 検討の候補数（MultiPV を持つエンジンに送る） */
   analysisMultiPv: number;
+  /** 対局中のエンジンに送る候補数（MultiPV）。増やすと候補が並ぶが読みは少し落ちる */
+  playMultiPv: number;
   /** 検討の枠に選んだエンジン（'auto' は局面で自動）。1 つ目が主 */
   analysisSlots: string[];
   /** 内蔵の布石評価の方式 */
@@ -68,6 +70,7 @@ export function defaultSettings(): Settings {
     theme: 'system',
     fusekiEngineId: BUILTIN_ID,
     analysisMultiPv: 3,
+    playMultiPv: 3,
     analysisSlots: ['auto'],
     builtinMethod: 'value',
     kifuAnalysisSec: 2,
@@ -136,6 +139,7 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     normalEngineId: saved.normalEngineId ?? saved.analysisEngineId,
     fusekiEngineId: saved.fusekiEngineId ?? d.fusekiEngineId,
     analysisMultiPv: saved.analysisMultiPv ?? d.analysisMultiPv,
+    playMultiPv: typeof saved.playMultiPv === 'number' && saved.playMultiPv >= 1 ? Math.min(10, Math.round(saved.playMultiPv)) : d.playMultiPv,
     analysisSlots: Array.isArray(saved.analysisSlots) && saved.analysisSlots.length ? saved.analysisSlots : d.analysisSlots,
     builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
     kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,

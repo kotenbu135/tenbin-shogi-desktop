@@ -44,6 +44,9 @@ async function loadBuiltin(log: (text: string) => void): Promise<BuiltinEvaluato
   }
 }
 
+/** 平手の初期局面。「本将棋」の対局と、局面編集の出発点に使う */
+const START_SFEN = 'lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1';
+
 async function main(): Promise<void> {
   const settings: Settings = await loadSettings();
   applyTheme(settings.theme);
@@ -181,6 +184,7 @@ async function main(): Promise<void> {
       halfInUse.set(seat, half);
       analysis.beginPlayer(half, sideLabel(half), cfg, targetOf(game.view()));
     },
+    multiPv: () => settings.playMultiPv,
     onThinking: (seat, info) => analysis.playerInfo(halfInUse.get(seat) ?? halfOfSeat(seat), info),
     onThinkEnd: (seat, state) => analysis.endPlayer(halfInUse.get(seat) ?? halfOfSeat(seat), state),
   });
@@ -364,7 +368,7 @@ async function main(): Promise<void> {
     if (game.moves.length > 0 && game.phase !== 'over' && !confirm('いまの対局を捨てて新しく始めますか')) return;
     const c: NewGameChoice | null = await newGameDialog.open();
     if (!c) return;
-    startGame(c.mode, { timeControl: c.timeControl });
+    startGame(c.mode, { timeControl: c.timeControl }, c.mode === 'position' ? START_SFEN : undefined);
     void driver.start(c);
     paintAll();
   }
@@ -534,7 +538,8 @@ async function main(): Promise<void> {
     el.replaceChildren();
     const title = document.createElement('div');
     title.className = 'game-title';
-    title.textContent = game.mode === 'tenbin' ? '天秤将棋' : game.mode === 'fuseki' ? '布石将棋' : '本将棋（任意の局面から）';
+    title.textContent =
+      game.mode === 'tenbin' ? '天秤将棋' : game.mode === 'fuseki' ? '布石将棋' : game.normalStartSfen === START_SFEN ? '本将棋' : '本将棋（任意の局面から）';
     el.appendChild(title);
     if (cursor !== null) {
       const p = document.createElement('div');
@@ -596,7 +601,7 @@ async function main(): Promise<void> {
       },
     });
     if (v.phase === 'normal' || v.phase === 'over') editor.loadSnapshot(v.snapshot);
-    else editor.loadSfen('lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1');
+    else editor.loadSfen(START_SFEN);
     editorEl.hidden = false;
     document.body.classList.add('editing');
     say('局面編集中。駒を置いて「この局面から本将棋を始める」を押します');

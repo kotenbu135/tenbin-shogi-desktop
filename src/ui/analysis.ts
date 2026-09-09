@@ -239,7 +239,7 @@ class Slot {
   paintTable(t: Target | null): void {
     // 出す行は「候補」の数まで。MultiPV を持たないエンジン（内蔵の布石評価は 16 手ぶん出す）でも
     // 表が伸びて欄がスクロール前提にならないようにする
-    const lines = this.sortedLines().slice(0, this.panel.maxLines);
+    const lines = this.sortedLines().slice(0, this.panel.maxLines(this.player));
     const top = lines[0];
     if (top && t && t.stage !== 'normal') {
       // 布石中の数字は価値ネットの推定。深さやノード数に意味は無いので、代わりに当てにできる度合いを出す。
@@ -320,9 +320,23 @@ export class AnalysisPanel {
   private readonly progress: HTMLElement;
 
   constructor(private readonly root: HTMLElement, private readonly playRoot: HTMLElement, private readonly deps: AnalysisDeps) {
-    playRoot.innerHTML = '<div class="play-slots"></div><div class="play-empty">対局を始めると、両方の側の候補手がここに並びます。</div>';
+    playRoot.innerHTML = `
+      <div class="analysis-head play-head">
+        <span class="play-title">対局中のエンジンの読み</span>
+        <label class="multipv" title="対局中のエンジンに送る MultiPV。増やすと候補が並ぶが、読みは少し落ちる"><span>候補</span><input type="number" min="1" max="10" value="${deps.settings().playMultiPv}" /></label>
+      </div>
+      <div class="play-slots"></div>
+      <div class="play-empty">対局を始めると、両方の側の候補手がここに並びます。</div>`;
     this.playersEl = playRoot.querySelector('.play-slots')!;
     this.playEmpty = playRoot.querySelector('.play-empty')!;
+    const playPv = playRoot.querySelector<HTMLInputElement>('.play-head .multipv input')!;
+    playPv.addEventListener('change', () => {
+      const n = Math.min(10, Math.max(1, Math.floor(Number(playPv.value) || 1)));
+      playPv.value = String(n);
+      this.deps.settings().playMultiPv = n;
+      void this.deps.save();
+      for (const s of this.players.values()) s.paintTable(s.playerTarget);
+    });
     root.innerHTML = `
       <div class="analysis-head">
         <button type="button" class="primary" data-act="toggle">検討を始める</button>
@@ -367,9 +381,10 @@ export class AnalysisPanel {
     return this.deps.pvText(usis, t);
   }
 
-  /** 表に出す候補の数 */
-  get maxLines(): number {
-    return this.deps.settings().analysisMultiPv;
+  /** 表に出す候補の数。対局中の枠と検討の枠で別々に持つ */
+  maxLines(player: boolean): number {
+    const s = this.deps.settings();
+    return player ? s.playMultiPv : s.analysisMultiPv;
   }
 
   // ---- 候補手の欄（対局中） ----

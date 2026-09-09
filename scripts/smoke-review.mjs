@@ -197,5 +197,17 @@ await new Promise((r) => setTimeout(r, 1200));
 console.log('再開:', await ev(() => window.tenbin.game().moves.length), '手目まで進んだ');
 await ev(() => window.tenbin.start('tenbin'));
 
+// 10. ふつうの本将棋を始められる。駒台は持ち駒だけ（布石のあいだは 20 枚ぶん全部出る）
+await ev(() => window.tenbin.play({ mode: 'position', seats: [{ type: 'human' }, { type: 'human' }], names: ['先', '後'], timeControl: null }));
+await new Promise((r) => setTimeout(r, 300));
+console.log('本将棋:', await status(), '| 題:', await ev(() => document.querySelector('.game-title').textContent),
+  '| 盤の駒', await ev(() => document.querySelectorAll('.cell .piece').length), '枚 | 駒台', await ev(() => document.querySelectorAll('.stand .slot').length), '枚');
+await ev(() => window.tenbin.start('tenbin'));
+await new Promise((r) => setTimeout(r, 200));
+console.log('両玉のとき駒台に出る駒:', await ev(() => {
+  const s = [...document.querySelectorAll('.stand.near .slot')];
+  return `${s.length} 種 / 押せる ${s.filter((b) => !b.disabled).length} 種 / 薄い ${s.filter((b) => getComputedStyle(b).opacity !== '1').length} 種`;
+}));
+
 console.log('errors:', errors.length ? errors : 'なし');
 await browser.close();

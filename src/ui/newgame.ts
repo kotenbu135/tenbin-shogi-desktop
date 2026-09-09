@@ -78,16 +78,16 @@ export class NewGameDialog {
             <label><input type="radio" name="type${i}" value="engine" ${p.type === 'engine' ? 'checked' : ''}/> エンジン</label>
           </div>
           <div class="seat-engine" ${p.type === 'engine' ? '' : 'hidden'}>
-            <label>本将棋（41手目から）<select name="normal${i}">
+            <label><span class="normal-label">本将棋（41手目から）</span><select name="normal${i}">
               <option value="">人が指す</option>
               ${normals.map((e) => `<option value="${e.id}" ${eng.normalId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
-            <label>布石（40手）<select name="fuseki${i}">
+            <label class="fuseki-only">布石（40手）<select name="fuseki${i}">
               <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>内蔵の方策</option>
               ${fusekis.map((e) => `<option value="${e.id}" ${eng.fusekiId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
             <div class="form-row two">
-              <label>強さ<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${lv.label}</option>`).join('')}</select></label>
+              <label class="fuseki-only">強さ<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${lv.label}</option>`).join('')}</select></label>
               <label>1手の秒数<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
             </div>
           </div>
@@ -98,8 +98,9 @@ export class NewGameDialog {
         <div class="dialog-head"><h2>新しい対局</h2></div>
         <fieldset class="kind">
           <legend>ルール</legend>
-          <label><input type="radio" name="mode" value="tenbin" ${l.mode !== 'fuseki' ? 'checked' : ''}/> 天秤将棋。一方が両方の玉を置き、もう一方が先後を選ぶ</label>
+          <label><input type="radio" name="mode" value="tenbin" ${l.mode === 'tenbin' ? 'checked' : ''}/> 天秤将棋。一方が両方の玉を置き、もう一方が先後を選ぶ</label>
           <label><input type="radio" name="mode" value="fuseki" ${l.mode === 'fuseki' ? 'checked' : ''}/> 布石将棋。空の盤に交互に20枚ずつ打ってから指す</label>
+          <label><input type="radio" name="mode" value="position" ${l.mode === 'position' ? 'checked' : ''}/> 本将棋。ふつうの平手の将棋</label>
         </fieldset>
         <div class="seats">${seat(0)}${seat(1)}</div>
         <div class="form-row">
@@ -117,6 +118,10 @@ export class NewGameDialog {
       const mode = (form.elements.namedItem('mode') as RadioNodeList).value as Mode;
       const titles = mode === 'tenbin' ? ['玉を置く側', '先後を選ぶ側'] : ['先手', '後手'];
       this.dialog.querySelectorAll('.seat-title').forEach((el, i) => (el.textContent = titles[i]!));
+      // 本将棋には布石が無い。布石のエンジンと強さは隠す
+      const fuseki = mode !== 'position';
+      for (const el of this.dialog.querySelectorAll<HTMLElement>('.fuseki-only')) el.hidden = !fuseki;
+      for (const el of this.dialog.querySelectorAll<HTMLElement>('.normal-label')) el.textContent = fuseki ? '本将棋（41手目から）' : '使うエンジン';
     };
     for (const r of form.querySelectorAll<HTMLInputElement>('input[name="mode"]')) r.addEventListener('change', seatTitles);
     seatTitles();

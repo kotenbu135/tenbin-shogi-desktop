@@ -29,6 +29,8 @@ export interface PlayDeps {
   onThinking(seat: 0 | 1, info: UsiInfo): void;
   /** 指した、または中断した */
   onThinkEnd(seat: 0 | 1, state: string): void;
+  /** 対局中のエンジンに送る候補数（MultiPV） */
+  multiPv(): number;
 }
 
 /** 画面が 1 度描かれるのを待つ。描かれない場（背景のタブなど）でも 60ms で戻る */
@@ -247,6 +249,15 @@ export class MatchDriver {
     return th;
   }
 
+  /**
+   * 対局中の候補数。既定の MultiPV は 1 なので、送らないと候補手の欄に 1 行しか出ない。
+   * 増やすと読みは少し落ちるので、数は利用者が決める（候補手の欄の「候補」）。
+   */
+  private sendMultiPv(th: Thinker): void {
+    if (!th.hasOption('MultiPV')) return;
+    th.setOption('MultiPV', Math.max(1, Math.round(this.deps.multiPv())));
+  }
+
   private goArgs(spec: Extract<PlayerSpec, { type: 'engine' }>): string {
     const c = this.deps.clock();
     if (c.enabled && c.control) {
@@ -267,6 +278,7 @@ export class MatchDriver {
         await th.start();
         await th.newGame();
       }
+      this.sendMultiPv(th);
       const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
       if (bm.move === 'resign') return 'resign';
       if (bm.move === 'win') {
@@ -306,6 +318,7 @@ export class MatchDriver {
       await th.start();
       await th.newGame();
     }
+    this.sendMultiPv(th);
     const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
     return bm.move === 'resign' ? 'resign' : bm.move;
   }

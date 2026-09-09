@@ -373,8 +373,6 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .slot:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); }
 .slot.selected, .slot.selected:hover { background: var(--selected); }
 .slot:disabled { cursor: default; opacity: 1; }
-/* 局面編集のときだけ、持っていない駒を薄く並べる（盤へ置くための台） */
-.slot.dim, .slot.dim:disabled { opacity: 0.12; }
 .slot .count {
   position: absolute; right: 2px; bottom: 0;
   font-size: calc(var(--sq) * 0.24); line-height: 1.3; font-weight: 600;
@@ -460,7 +458,9 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .analysis-slot .analysis-table { overflow: auto; }
 
 /* 候補手の欄。左が先手、右が後手。**片方が人でも 2 分割のまま**にする */
-.play-panel { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; overflow: hidden; }
+.play-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; overflow: hidden; }
+.play-head { justify-content: space-between; }
+.play-title { color: var(--ink-2); font-size: 13px; }
 .play-slots { display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
 .play-slots:empty { display: none; }
 .play-slots .analysis-slot { border-top: 0; }
