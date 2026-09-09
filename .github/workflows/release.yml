@@ -38,7 +38,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 天秤将棋 __VERSION__
-          releaseBody: 変更の中身はコミットを見てください。
+          releaseBody: |
+            天秤将棋 __VERSION__
+
+            インストーラ（`*-setup.exe`）を落として実行してください。
+            すでに入れている方は、アプリが起動のたびに更新を見に行きます。
+
+            変更の中身はコミットの履歴を見てください。
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
