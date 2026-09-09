@@ -879,6 +879,8 @@ async function main(): Promise<void> {
     }
     switch (e.key) {
       case ' ':
+        // ボタンに焦点があるときの Space はそのボタンを押す操作。二重に効かせない
+        if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return;
         if (!driver.active) return;
         e.preventDefault();
         void togglePause();
