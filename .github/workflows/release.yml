@@ -36,6 +36,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          # NSIS だけ作る。MSI（WiX）は productName が日本語だと light.exe で落ちるうえ、
+          # 自動更新が使うのは NSIS のほう
+          args: --bundles nsis
           tagName: ${{ github.ref_name }}
           releaseName: 天秤将棋 __VERSION__
           releaseBody: |
