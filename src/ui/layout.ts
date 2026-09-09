@@ -113,7 +113,12 @@ export class Layout {
   private dragTab(e: PointerEvent, b: HTMLButtonElement, tab: TabId, pane: number): void {
     if (e.button !== 0) return;
     e.preventDefault();
-    b.setPointerCapture(e.pointerId);
+    // 捕まえられれば捕まえる。効かない環境でも window で受けるので運べる
+    try {
+      b.setPointerCapture(e.pointerId);
+    } catch {
+      /* 合成した pointer など、捕まえられないことがある */
+    }
     const x0 = e.clientX;
     const y0 = e.clientY;
     let ghost: HTMLElement | null = null;
@@ -133,9 +138,9 @@ export class Layout {
       this.paintDropHint(target);
     };
     const up = () => {
-      b.removeEventListener('pointermove', move);
-      b.removeEventListener('pointerup', up);
-      b.removeEventListener('pointercancel', up);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
       b.classList.remove('dragging');
       ghost?.remove();
       this.paintDropHint(null);
@@ -146,9 +151,9 @@ export class Layout {
       if (target?.kind === 'pane') this.moveTab(tab, target.index);
       else if (target?.kind === 'new') this.newPaneWith(tab, target.at);
     };
-    b.addEventListener('pointermove', move);
-    b.addEventListener('pointerup', up);
-    b.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
   }
 
   /** その座標の落とし先 */
