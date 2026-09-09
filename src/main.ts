@@ -200,6 +200,8 @@ async function main(): Promise<void> {
       thinkingColor = color;
       analysis.beginPlayer(half, sideLabel(half), cfg, targetOf(game.view()));
       paintBoard();
+      // 「起動しています…」を残さない。考え始めたら局面の案内に戻す
+      if (cursor === null) say(phaseText(lastView ?? currentView()));
     },
     multiPv: () => settings.playMultiPv,
     canApply: (token) => game.canApply(token),
