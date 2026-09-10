@@ -2,8 +2,9 @@
 
 ## 版を上げて出す
 
-1. `package.json` と `src-tauri/tauri.conf.json` の `version` を上げる
-2. `git tag v0.3.0 && git push --tags`
+1. `version` を上げる。5 か所ある: `package.json` / `package-lock.json`（根と自分自身の 2 行）/
+   `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `Cargo.lock`（`tenbin-shogi-gui` の行）
+2. `git tag v0.4.0 && git push origin v0.4.0`
 3. `.github/workflows/release.yml` が windows-latest で NSIS の配布物と `latest.json` を作り、
    Releases に**下書き**で置く
 4. 中身を確かめて **Publish**
@@ -11,6 +12,13 @@
 **「Pre-release」にしてはいけない。** GitHub の `releases/latest` は下書きと pre-release を外すので、
 `releases/latest/download/latest.json` が 404 になり、アプリの「更新を確認」が
 `Could not fetch a valid release JSON from the remote` で落ちる。
+画面から publish すると印を取り違えるので（v0.3.0 で踏んだ）、次の 1 行で出す:
+
+```bash
+gh release edit v0.4.0 --draft=false --prerelease=false --latest --notes-file <変更点>.md
+# 200 なら利用者に更新が届く
+curl -sIL -o /dev/null -w '%{http_code}\n' https://github.com/kotenbu135/tenbin-shogi-desktop/releases/latest/download/latest.json
+```
 
 ## 署名の鍵
 
