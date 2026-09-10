@@ -113,6 +113,13 @@ const YANEURAOU_7Z: &str =
 const SUISHO5_7Z: &str =
     "https://github.com/yaneurao/YaneuraOu/releases/download/suisho5/Suisho5.7z";
 
+/// 取ってきた書庫の SHA-256（2026-09-10 に配布元から取って測った値）。
+/// 上流が同じ URL に別の中身を置き直したら、取り出しに進まずここで止める。
+const YANEURAOU_7Z_SHA256: &str =
+    "6517997dd05ba049a2244a828216967a0ad351d975ec52a0f358e2883197dec6";
+const SUISHO5_7Z_SHA256: &str =
+    "6734e3a3d28e67b9206c3442f6d10f16148138327dff811cadedfcf581f79809";
+
 /// この CPU に合う実行ファイルの接尾辞。やねうら王は CPU ごとに別の実行ファイルを配る
 fn cpu_suffix() -> &'static str {
     #[cfg(target_arch = "x86_64")]
@@ -147,14 +154,47 @@ fn step(app: &AppHandle, text: &str, percent: u32) {
     let _ = app.emit("engine-install", InstallStep { text: text.into(), percent });
 }
 
-async fn fetch_to(url: &str, to: &std::path::Path) -> Result<(), String> {
-    let res = reqwest::get(url)
+/// 配布元から 1 つ落とす。**待ち続けない**（つながらない・止まったら諦める）、
+/// **丸ごとメモリに載せない**（流しながら書く）、**中身を照合する**（SHA-256）。
+/// 上流が資産を消す・貼り替えるのはこちらでは止められないので、せめて黙って壊れないようにする。
+async fn fetch_to(url: &str, to: &std::path::Path, sha256: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        // 全体の制限にすると、遅い回線で 24MB を落とせなくなる。止まったことだけを見る
+        .read_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("取りに行く用意ができない: {e}"))?;
+    let mut res = client
+        .get(url)
+        .send()
         .await
-        .map_err(|e| format!("取りに行けない: {e}"))?
+        .map_err(|e| format!("取りに行けない: {url} ({e})"))?
         .error_for_status()
-        .map_err(|e| format!("取れない: {e}"))?;
-    let bytes = res.bytes().await.map_err(|e| format!("読めない: {e}"))?;
-    std::fs::write(to, &bytes).map_err(|e| format!("書けない: {} ({e})", to.display()))?;
+        .map_err(|e| format!("取れない: {url} ({e})"))?;
+
+    let mut f = std::fs::File::create(to).map_err(|e| format!("書けない: {} ({e})", to.display()))?;
+    let mut hasher = Sha256::new();
+    while let Some(chunk) = res
+        .chunk()
+        .await
+        .map_err(|e| format!("読めない: {url} ({e})"))?
+    {
+        hasher.update(&chunk);
+        std::io::Write::write_all(&mut f, &chunk)
+            .map_err(|e| format!("書けない: {} ({e})", to.display()))?;
+    }
+    drop(f);
+
+    let got = hasher.finalize();
+    let got = got.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    if got != sha256 {
+        let _ = std::fs::remove_file(to);
+        return Err(format!(
+            "配布元の中身が変わっている（{url} の SHA-256 が {got}、こちらが待っているのは {sha256}）"
+        ));
+    }
     Ok(())
 }
 
@@ -198,7 +238,7 @@ async fn install_recommended_engine(app: AppHandle) -> Result<String, String> {
     let exe = root.join("YaneuraOu_NNUE.exe");
 
     step(&app, "やねうら王を取りに行っています（13MB）…", 5);
-    fetch_to(YANEURAOU_7Z, &a1).await?;
+    fetch_to(YANEURAOU_7Z, &a1, YANEURAOU_7Z_SHA256).await?;
     step(&app, "やねうら王を取り出しています…", 35);
     let want = format!(
         "NNUE_halfkp_256x2_32_32/YaneuraOu_NNUE_halfkp_256x2_32_32-V900Git_{}.exe",
@@ -210,7 +250,7 @@ async fn install_recommended_engine(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())??;
 
     step(&app, "水匠5 の評価関数を取りに行っています（24MB）…", 55);
-    fetch_to(SUISHO5_7Z, &a2).await?;
+    fetch_to(SUISHO5_7Z, &a2, SUISHO5_7Z_SHA256).await?;
     step(&app, "水匠5 を取り出しています（61MB）…", 80);
     let (a2c, nn) = (a2.clone(), root.join("eval").join("nn.bin"));
     tauri::async_runtime::spawn_blocking(move || extract_one(&a2c, "nn.bin", &nn))

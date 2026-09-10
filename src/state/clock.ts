@@ -46,7 +46,10 @@ export class Clock {
   onTick: (() => void) | null = null;
   onTimeout: ((loser: Color) => void) | null = null;
 
-  constructor(readonly control: TimeControl | null) {
+  readonly control: TimeControl | null;
+
+  constructor(control: TimeControl | null) {
+    this.control = control;
     const m = (control?.mainSec ?? 0) * 1000;
     this.remainingMs_ = { sente: m, gote: m };
   }

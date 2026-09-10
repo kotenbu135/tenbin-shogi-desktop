@@ -90,11 +90,15 @@ Tauri v2 + TypeScript（フレームワーク無し）。ルールは wasm（cpp
 
 ```bash
 npm install
-npm test                 # USI の分解のテスト
+npm test                 # USI の分解・KIF の読み・持ち時間の書式
 cargo test -p usi-host   # プロセス管理のテスト
 npm run tauri dev        # アプリとして起動
 ```
 
+push と PR では [ci.yml](.github/workflows/ci.yml) が型・テスト・ビルド・clippy と、
+Windows でアプリが通るかを回します。
+
+- 変更の記録: [CHANGELOG.md](CHANGELOG.md)
 - 配布の手順と署名の鍵: [docs/release.md](docs/release.md)
 - 設計と検証: [docs/plan-desktop-gui.md](docs/plan-desktop-gui.md) ·
   [docs/review-vs-existing-gui.md](docs/review-vs-existing-gui.md) ·

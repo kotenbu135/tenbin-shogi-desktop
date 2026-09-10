@@ -180,7 +180,12 @@ export class Game {
   private readonly basePly: number;
   over: GameOver | null = null;
 
-  constructor(private readonly fuseki: Fuseki, readonly mode: Mode, startSfen?: string) {
+  private readonly fuseki: Fuseki;
+  readonly mode: Mode;
+
+  constructor(fuseki: Fuseki, mode: Mode, startSfen?: string) {
+    this.fuseki = fuseki;
+    this.mode = mode;
     fuseki.reset();
     this.basePly = mode === 'position' ? 0 : 40;
     if (mode === 'position') {

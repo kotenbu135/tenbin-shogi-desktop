@@ -2,12 +2,14 @@
 
 ## 版を上げて出す
 
-1. `version` を上げる。5 か所ある: `package.json` / `package-lock.json`（根と自分自身の 2 行）/
-   `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `Cargo.lock`（`tenbin-shogi-gui` の行）
-2. `git tag v0.4.0 && git push origin v0.4.0`
-3. `.github/workflows/release.yml` が windows-latest で NSIS の配布物と `latest.json` を作り、
+1. `npm run bump 0.4.1` で版を上げる。版は 5 か所にある（`package.json` /
+   `package-lock.json` の 2 行 / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` /
+   `Cargo.lock`）ので手で直さない。script が直したあとに数え直し、1 つでも古ければ落ちる
+2. `CHANGELOG.md` の先頭にその版の変更点を書く（Release の本文はここから写す）
+3. `git tag v0.4.1 && git push origin v0.4.1`
+4. `.github/workflows/release.yml` が windows-latest で NSIS の配布物と `latest.json` を作り、
    Releases に**下書き**で置く
-4. 中身を確かめて **Publish**
+5. 中身を確かめて **Publish**
 
 **「Pre-release」にしてはいけない。** GitHub の `releases/latest` は下書きと pre-release を外すので、
 `releases/latest/download/latest.json` が 404 になり、アプリの「更新を確認」が
@@ -15,7 +17,8 @@
 画面から publish すると印を取り違えるので（v0.3.0 で踏んだ）、次の 1 行で出す:
 
 ```bash
-gh release edit v0.4.0 --draft=false --prerelease=false --latest --notes-file <変更点>.md
+# 本文は CHANGELOG.md からその版の節を切り出して渡す
+gh release edit v0.4.1 --draft=false --prerelease=false --latest --notes-file <その版の節>.md
 # 200 なら利用者に更新が届く
 curl -sIL -o /dev/null -w '%{http_code}\n' https://github.com/kotenbu135/tenbin-shogi-desktop/releases/latest/download/latest.json
 ```
@@ -43,8 +46,18 @@ curl -sIL -o /dev/null -w '%{http_code}\n' https://github.com/kotenbu135/tenbin-
   では署名を見つけられないので、`latest.json` はワークフローの中で自分で組み立てる
 - ビルドの成果物はワークスペースの根の `target/`（`src-tauri/target` ではない）
 - `set -o pipefail` の下で `ls A B` は片方が無いと落ちる → `find` で探す
+- **自動導入は配布元の 7z の SHA-256 を照合する**（`src-tauri/src/lib.rs` の
+  `YANEURAOU_7Z_SHA256` / `SUISHO5_7Z_SHA256`）。上流が同じ URL に別の中身を置き直したら、
+  取り出しに進まず「配布元の中身が変わっている」で止まる。**そのときは中身を確かめてから
+  ハッシュを取り直して更新する**（黙って新しい中身を入れるより、止まって気づくほうを採る）
 
 ## 動作の確かめ方
+
+push と PR では `.github/workflows/ci.yml` が型・テスト・ビルド・clippy と、Windows で
+アプリが通るかを回す。**`npm test` はテストファイルが 0 本なら落ちる**（0.4.0 まではシェルの
+glob 頼みで、一致 0 件でも成功で終わっていた＝何も検査せず緑になっていた）。
+
+手元で確かめるとき:
 
 ```bash
 npm run build && npm run preview          # http://localhost:4173

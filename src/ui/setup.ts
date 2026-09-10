@@ -135,7 +135,7 @@ export class SetupDialog {
             <button type="button" class="primary" data-act="install">${t('su_install')}</button>
             <span class="hint">${t('su_install_hint')}</span>
           </div>
-          <div class="install-note">${this.lastNote}</div>
+          <div class="install-note">${escapeHtml(this.lastNote)}</div>
         </section>
 
         <section class="setup-step">
@@ -169,4 +169,8 @@ export class SetupDialog {
       /* 分からなくても案内は出す */
     }
   }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }

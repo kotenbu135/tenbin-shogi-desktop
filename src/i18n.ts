@@ -187,6 +187,7 @@ const DICT = {
     en: 'This is the browser preview. The board and the record work, but engines and record files need the Tauri app.',
   },
   msg_boot_failed: { ja: '起動できない: {msg}', en: 'Cannot start: {msg}' },
+  msg_unexpected: { ja: '思わぬ失敗: {msg}', en: 'Unexpected failure: {msg}' },
   msg_builtin_loaded: {
     ja: '内蔵の布石評価: 方策 {policy} / 価値ネット {value}{kings}',
     en: 'Built-in placement evaluator: policy {policy} / value net {value}{kings}',
@@ -566,7 +567,10 @@ const DICT = {
   su_installed: { ja: '入りました。{name} を本将棋の既定にしました', en: 'Installed. {name} is now the default for shogi' },
   su_say_failed: { ja: 'エンジンを入れましたが起動できません: {msg}', en: 'The engine was installed but will not start: {msg}' },
   su_say_installed: { ja: '{name} を入れました', en: 'Installed {name}' },
-  su_install_failed: { ja: '入れられません: {msg}', en: 'Cannot install it: {msg}' },
+  su_install_failed: {
+    ja: '入れられません: {msg} ／ 手でも入れられます: 「エンジン」→「実行ファイルを選んで追加」（配布元と手順は README の「エンジンを手動で入れる」）',
+    en: 'Cannot install it: {msg} / You can also do it by hand: Engines → Add an executable (see "Installing an engine by hand" in the README).',
+  },
 
   // ---- 検討の欄 ----
   an_slot_engine: { ja: 'この枠のエンジン', en: 'Engine for this pane' },

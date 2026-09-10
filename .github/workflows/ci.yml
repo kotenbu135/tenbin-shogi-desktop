@@ -1,0 +1,59 @@
+# push と PR で、README が案内しているものをそのまま回す。
+#
+# ここが緑でも「何も検査していない」ことがないように、テストの列挙は scripts/test.mjs が
+# 数えて 0 なら落とす（0.4.0 まではシェルの glob 頼みで、一致 0 件でも成功で終わっていた）。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  front:
+    name: 画面（型・テスト・ビルド）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # tsc --noEmit も中で走る
+      - run: npm run build
+
+  host:
+    name: エンジンのプロセス管理（Rust）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: swatinem/rust-cache@v2
+      # usi-host は Tauri に依らないので、WebKit などの重い依存を入れずに済む
+      - run: cargo test -p usi-host
+      # fmt は掛けない。既存の書き方（横に長い）を rustfmt の既定で総取っ替えすることになるため
+      - run: cargo clippy -p usi-host --all-targets -- -D warnings
+
+  app:
+    name: アプリ本体（Windows でビルドが通るか）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - run: npm ci
+      # generate_context! が dist/ を読むので、先に画面を作る
+      - run: npm run build
+      # 配布物までは作らない（それは release.yml の仕事）。Rust 側が Windows で通ることだけ見る
+      - run: cargo check -p tenbin-shogi-gui

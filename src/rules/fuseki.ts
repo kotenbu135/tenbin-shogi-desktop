@@ -50,7 +50,10 @@ interface EmModule {
 }
 
 export class Fuseki {
-  private constructor(private readonly M: EmModule) {
+  private readonly M: EmModule;
+
+  private constructor(M: EmModule) {
+    this.M = M;
     this.reset();
   }
 

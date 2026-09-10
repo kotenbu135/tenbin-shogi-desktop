@@ -258,8 +258,9 @@ export class MatchDriver {
       if (token && !this.deps.canApply(token)) {
         this.deps.onLog(this.names[cur.seat] || t('engine_word'), 'sys', t('pl_bad_move_twice_log', { token }));
         this.endThinking(t('th_stopped'));
-        this.deps.say(t('pl_bad_move_stop', { token }), true);
+        // pause() は同期のうちに paintAll() 経由で say() を呼ぶので、知らせるのはそのあと
         void this.pause();
+        this.deps.say(t('pl_bad_move_stop', { token }), true);
         return;
       }
       if (token) this.deps.apply(token);
@@ -267,6 +268,8 @@ export class MatchDriver {
       if (gen !== this.gen) return;
       this.pendingKey = null;
       this.endThinking(t('th_stopped'));
+      // 止めないと、指す者が居ないまま時計だけ動いて時間切れになる（エンジンが落ちた・応答しない）
+      void this.pause();
       this.deps.say(t('pl_engine_error', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }

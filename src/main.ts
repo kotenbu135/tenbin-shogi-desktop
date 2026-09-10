@@ -1102,11 +1102,18 @@ const ICON = {
   lang: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15"/><path d="M10 2.5c2.2 2.2 3.2 4.8 3.2 7.5S12.2 15.3 10 17.5C7.8 15.3 6.8 12.7 6.8 10S7.8 4.7 10 2.5z"/></svg>',
 };
 
-main().catch((e) => {
+/** 状態欄に赤で出し、console にも残す。起動の失敗と、拾い損ねた失敗の共通の出口 */
+function fail(key: 'msg_boot_failed' | 'msg_unexpected', e: unknown): void {
   const s = document.getElementById('status');
   if (s) {
-    s.textContent = t('msg_boot_failed', { msg: e instanceof Error ? e.message : String(e) });
+    s.textContent = t(key, { msg: e instanceof Error ? e.message : String(e) });
     s.classList.add('error');
   }
   console.error(e);
-});
+}
+
+// 誰も拾わなかった失敗を黙って落とさない。無言で止まるのが対局中は一番困る
+window.addEventListener('error', (ev) => fail('msg_unexpected', ev.error ?? ev.message));
+window.addEventListener('unhandledrejection', (ev) => fail('msg_unexpected', ev.reason));
+
+main().catch((e) => fail('msg_boot_failed', e));

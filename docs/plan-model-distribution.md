@@ -24,6 +24,12 @@
    GPL-3.0-or-later）、リポジトリの公開（GPL §6 の対応するソース）、モデルの manifest、
    公開サイト側の教師信号の記述の矛盾（後述）。
 
+   **その後（2026-09-10、0.4.1 の時点）**: 上の 4 つのうち 3 つは済んでいる。
+   shogiops は `THIRD_PARTY.md` で GPL-3.0-or-later と書いてある。リポジトリは公開済み
+   （`kotenbu135/tenbin-shogi-desktop`）。モデルの manifest は `public/models/models.json` に
+   SHA-256 つきである。**残りは公開サイト（fuseki-shogi-web）側の教師信号の記述の矛盾**で、
+   これは別のリポジトリの直し。こちらの配布物には影響しない。
+
 ## 1. 機能ごとに何が要るか
 
 | 機能 | 要るもの | 大きさ | 由来 | 配布 |

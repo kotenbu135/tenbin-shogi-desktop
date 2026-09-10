@@ -47,7 +47,8 @@ jobs:
             インストーラ（`*-setup.exe`）を落として実行してください。
             すでに入れている方は、アプリが起動のたびに更新を見に行きます。
 
-            変更の中身はコミットの履歴を見てください。
+            変更の中身は CHANGELOG.md を見てください。
+            https://github.com/kotenbu135/tenbin-shogi-desktop/blob/main/CHANGELOG.md
           releaseDraft: true
           prerelease: false
           # latest.json は自分で作る。製品名が日本語だと GitHub がアセット名から

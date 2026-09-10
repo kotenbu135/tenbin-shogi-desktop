@@ -1,6 +1,6 @@
 [package]
 name = "tenbin-shogi-gui"
-version = "0.4.0"
+version = "0.4.1"
 description = "天秤将棋のデスクトップGUI（対局・検討）"
 edition.workspace = true
 license.workspace = true
@@ -26,6 +26,8 @@ encoding_rs = "0.8"
 # おすすめのエンジンを取り込むため（配布物は 7z）
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "charset"] }
 sevenz-rust2 = "0.22"
+# 取ってきた書庫の中身の照合（配布元の貼り替えに気づくため）
+sha2 = "0.10"
 
 # 自動更新はデスクトップだけ（モバイルには入れない）
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
