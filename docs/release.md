@@ -32,6 +32,13 @@ curl -sIL -o /dev/null -w '%{http_code}\n' https://github.com/kotenbu135/tenbin-
 ## 踏んだ罠
 
 - MSI（WiX）は productName が日本語だと `light.exe` が落ちる → `--bundles nsis` だけ作る
+- **`productName` を変えると別のアプリになる。** NSIS はこれ 1 つから
+  入れ先（`$LOCALAPPDATA\${PRODUCTNAME}`）・アンインストールの登録
+  （`…\Uninstall\${PRODUCTNAME}`）・ショートカット（`${PRODUCTNAME}.lnk`）を全部作るので、
+  変えた版は前の版を**上書きせず隣に入る**。古いショートカットは古い exe を指したままなので、
+  利用者は古い版を起動し続け、「新しい版があります」が毎回出る（0.4.0 で踏んだ）。
+  変えるなら、前の名前をアンインストールしてもらう案内を Release の本文と README に必ず添える。
+  実行ファイル名は `mainBinaryName` で固定してある（Cargo の `name` に付いていかないように）
 - GitHub は資産名から日本語を落とす（`天秤将棋GUI_…` → `GUI_…`。ワークフローが消す）。tauri-action の `includeUpdaterJson`
   では署名を見つけられないので、`latest.json` はワークフローの中で自分で組み立てる
 - ビルドの成果物はワークスペースの根の `target/`（`src-tauri/target` ではない）
