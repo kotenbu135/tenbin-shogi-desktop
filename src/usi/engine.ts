@@ -24,6 +24,14 @@ export interface EngineConfig {
   /** normal: 41手目以降だけ。fuseki: 布石 USI 拡張（position fuseki）を受ける */
   kind: EngineKind;
   /**
+   * GPU（DNN）で読むエンジンか。dlshogi・ふかうら王など。
+   * 立つのは同時に 1 本だけ（VRAM は席の数だけ増えない）で、準備を長く待つ。
+   * 申告に `DNN_` で始まる項目があれば登録のときに立てる。利用者が外せる。
+   */
+  gpu?: boolean;
+  /** isready の返事を待つ秒数。省略時は GPU なら {@link GPU_READY_SEC}、それ以外 {@link READY_SEC} */
+  readySec?: number;
+  /**
    * setoption の上書き。name → value。Threads・USI_Hash・MultiPV・EvalDir も普通の項目としてここに入る。
    * エンジンが申告した既定値と同じものは持たない。
    */
@@ -47,8 +55,34 @@ export function newEngineConfig(): EngineConfig {
   };
 }
 
-/** よく触る項目は先頭に出す。残りは申告順 */
-export const COMMON_OPTIONS = ['Threads', 'USI_Hash', 'MultiPV', 'EvalDir', 'BookFile', 'USI_OwnBook', 'FV_SCALE', 'NetworkDelay', 'NetworkDelay2'];
+/** よく触る項目は先頭に出す。残りは申告順。GPU のエンジンは名前が違う（Threads ではなく UCT_Threads） */
+export const COMMON_OPTIONS = [
+  'Threads', 'USI_Hash', 'MultiPV', 'EvalDir', 'BookFile', 'USI_OwnBook', 'FV_SCALE', 'NetworkDelay', 'NetworkDelay2',
+  'UCT_Threads', 'DNN_Model', 'DNN_Batch_Size', 'UCT_NodeLimit', 'Eval_Coef',
+];
+
+/** 一覧の見出しに出す項目（持っているものだけ、この順に 3 つまで） */
+export const SUMMARY_OPTIONS = ['Threads', 'UCT_Threads', 'USI_Hash', 'DNN_Model', 'DNN_Batch_Size', 'EvalDir'];
+
+/** 普通のエンジンの isready を待つ秒数 */
+export const READY_SEC = 120;
+/**
+ * GPU のエンジンの isready を待つ秒数。初回は模型を GPU 向けに組み直すため
+ * （TensorRT の最適化）5〜15 分かかることがある。2 回目からは残った結果を使うので速い。
+ */
+export const GPU_READY_SEC = 1200;
+
+/** GPU（DNN）で読むエンジンか。dlshogi 系は `DNN_` で始まる項目を申告する */
+export function usesGpu(options: UsiOption[]): boolean {
+  return options.some((o) => /^DNN_/.test(o.name));
+}
+
+/** そのエンジンの isready を待つ秒数 */
+export function readySecOf(cfg: Pick<EngineConfig, 'gpu' | 'readySec'>): number {
+  const v = cfg.readySec;
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.max(10, Math.round(v));
+  return cfg.gpu ? GPU_READY_SEC : READY_SEC;
+}
 
 export function optionValue(cfg: EngineConfig, name: string): string | undefined {
   if (cfg.options[name] !== undefined) return cfg.options[name];
@@ -78,6 +112,39 @@ function ensureListener(): Promise<void> {
   return listening;
 }
 
+/**
+ * いま GPU を握っているエンジン。GPU は 1 枚しか無いのが普通で、模型を読んだ process を
+ * 席の数だけ立てると VRAM が尽きて落ちる。だから GPU のエンジンは同時に 1 本だけ立てる。
+ * 使い回して 2 か所から go を送るのは駄目（このファイルの冒頭の規律）なので、断るのが正しい。
+ */
+let gpuHolder: UsiEngine | null = null;
+
+async function claimGpu(e: UsiEngine): Promise<void> {
+  if (!e.config.gpu) return;
+  const held = gpuHolder;
+  if (!held || held === e || held.state === 'stopped') {
+    gpuHolder = e;
+    return;
+  }
+  const name = held.config.name || held.idName || held.config.path;
+  // 準備の途中のものは畳めない。その起動を待っている側（検討の枠・対局）が黙って失敗する
+  if (held.state === 'starting') throw new Error(t('eng_gpu_starting', { name }));
+  // 読んでいる最中のものも畳めない。待っている側（対局の go）の答えを奪うことになる
+  if (held.state !== 'ready') throw new Error(t('eng_gpu_busy', { name }));
+  // 対局が握っているものも畳まない。手番の合間の「空き」で取り上げると、毎手 模型を読み直す
+  if (held.reserved) throw new Error(t('eng_gpu_in_game', { name }));
+  // 空いているだけなら、その process を畳んで GPU を渡す。1 本を 2 か所で使い回してはいけない
+  // （このファイルの冒頭の規律）ので、立て直す
+  e.onLog?.('sys', t('eng_gpu_freed_log', { name }));
+  e.onStatus?.(t('eng_gpu_freed', { name }));
+  await held.quit();
+  gpuHolder = e;
+}
+
+function releaseGpu(e: UsiEngine): void {
+  if (gpuHolder === e) gpuHolder = null;
+}
+
 export type EngineState = 'stopped' | 'starting' | 'ready' | 'thinking';
 export type LogDirection = 'in' | 'out' | 'err' | 'sys';
 
@@ -97,6 +164,10 @@ export interface Thinker {
   idName: string;
   onLog: ((dir: LogDirection, text: string) => void) | null;
   onStateChange: ((s: EngineState) => void) | null;
+  /** 起動の途中経過（GPU のエンジンは準備に何分もかかるので、黙って待たせない） */
+  onStatus?: ((text: string) => void) | null;
+  /** 対局が握っている。手番の合間で空いていても、GPU を他へ渡さない */
+  reserved?: boolean;
   start(): Promise<void>;
   /** `position …` を渡して考えさせる。info は onInfo へ。止めるのは stop() */
   goInfinite(positionCmd: string, onInfo: (info: UsiInfo) => void): Promise<void>;
@@ -118,6 +189,9 @@ export class UsiEngine implements Thinker {
   options: UsiOption[] = [];
   onLog: ((dir: LogDirection, text: string) => void) | null = null;
   onStateChange: ((s: EngineState) => void) | null = null;
+  onStatus: ((text: string) => void) | null = null;
+  /** 対局が握っている。手が返ったあとの「空き」で GPU を取り上げられると、毎手 模型を読み直すことになる */
+  reserved = false;
   private waiters: Waiter[] = [];
   private onInfo: ((info: UsiInfo) => void) | null = null;
   private chain: Promise<unknown> = Promise.resolve();
@@ -127,6 +201,8 @@ export class UsiEngine implements Thinker {
   private startToken = 0;
   /** process が落ちたか。起動の途中で落ちたときに、応答を待たずに失敗させる */
   private exited = false;
+  /** process を立てたか。立てる前に失敗した起動（GPU の空き待ちなど）で、居ない子を止めに行かない */
+  private spawned = false;
   /** 止めたのに応答が無かった探索の数。遅れて届く bestmove をその数だけ捨てる */
   private stale = 0;
   /** プロセスの識別子。同じ登録を2本立てる（対局の先後）ときは別にする */
@@ -157,12 +233,13 @@ export class UsiEngine implements Thinker {
     const token = ++this.startToken;
     this.starting = (async () => {
       try {
+        await claimGpu(this);
         await this.spawn();
         this.send('usi');
         await this.waitFor((l) => l === 'usiok', 15000);
         this.applyOptions();
         this.send('isready');
-        await this.waitFor((l) => l === 'readyok', 120000);
+        await this.waitReady();
         this.setState('ready');
       } catch (e) {
         // 既に次の起動が始まっていたら、そちらの process を巻き添えに殺さない
@@ -176,9 +253,30 @@ export class UsiEngine implements Thinker {
     return this.starting;
   }
 
+  /**
+   * isready の返事を待つ。GPU のエンジンは模型を読み、初回は GPU 向けに組み直すので長い。
+   * 待ちきれなかったときは「待つ秒数を増やせる」ことまで言う（同じ失敗を繰り返させない）。
+   */
+  private async waitReady(): Promise<void> {
+    const sec = readySecOf(this.config);
+    this.status(this.config.gpu ? t('eng_loading_gpu') : t('eng_loading'));
+    try {
+      await this.waitFor((l) => l === 'readyok', sec * 1000);
+    } catch (e) {
+      if (this.exited) throw e;
+      throw new Error(t('eng_ready_timeout', { sec }));
+    }
+  }
+
+  /** 起動の途中経過を伝える。画面に出るのは起動中だけ */
+  private status(text: string): void {
+    this.onStatus?.(text);
+  }
+
   private async spawn(): Promise<void> {
     this.exited = false;
     this.stale = 0;
+    this.spawned = true;
     await ensureListener();
     receivers.set(this.processId, (p) => this.receive(p));
     await invoke('engine_start', {
@@ -217,11 +315,15 @@ export class UsiEngine implements Thinker {
 
   private receive(p: EnginePayload): void {
     if (p.kind === 'exit') {
-      this.log('sys', t('eng_exited_log'));
+      // 終了コードは、何も言わずに落ちたときの唯一の手がかり（GPU のエンジンは CUDA や
+      // TensorRT の DLL が揃っていないと、標準エラーに 1 行も出さずに即死する）
+      const code = p.code ?? null;
+      this.log('sys', code === null ? t('eng_exited_log') : t('eng_exited_code_log', { code }));
       this.expecting = false;
       this.exited = true;
       this.starting = null; // 落ちた起動を掴ませない（次の start() は新しく立ち上げる）
-      this.failWaiters(new Error(t('eng_exited')));
+      releaseGpu(this);
+      this.failWaiters(new Error(code === null || code === 0 ? t('eng_exited') : t('eng_exited_code', { code })));
       receivers.delete(this.processId);
       this.setState('stopped');
       return;
@@ -229,6 +331,8 @@ export class UsiEngine implements Thinker {
     const line = (p.line ?? '').replace(/\r$/, '');
     if (p.kind === 'stderr') {
       this.log('err', line);
+      // 準備の途中の進み具合はここに出る実装が多い。起動中だけ画面へ回す
+      if (this.state === 'starting' && line.trim()) this.status(line.trim().slice(0, 120));
       return;
     }
     this.log('in', line);
@@ -237,6 +341,7 @@ export class UsiEngine implements Thinker {
     if (id?.author) this.idAuthor = id.author;
     const opt = parseOption(line);
     if (opt) this.options.push(opt);
+    if (this.state === 'starting' && line.startsWith('info string')) this.status(line.slice('info string'.length).trim().slice(0, 120));
     if (line.startsWith('info')) {
       const info = parseInfo(line);
       if (info && (info.scoreCp !== undefined || info.scoreMate !== undefined || info.winrate !== undefined || info.string !== undefined)) {
@@ -369,9 +474,11 @@ export class UsiEngine implements Thinker {
     this.onInfo = null;
     this.expecting = false;
     this.starting = null;
+    releaseGpu(this);
     receivers.delete(this.processId);
     this.failWaiters(new Error(t('eng_killed')));
-    if (isTauri()) {
+    if (isTauri() && this.spawned) {
+      this.spawned = false;
       try {
         await invoke('engine_stop', { id: this.processId });
       } catch (e) {

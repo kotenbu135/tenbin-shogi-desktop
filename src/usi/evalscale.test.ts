@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpToP, pToCp, recipeFor, presetOf, EVAL_PRESETS } from './evalscale.ts';
+import { cpToP, pToCp, recipeFor, presetOf, evalFromDeclaration, EVAL_PRESETS } from './evalscale.ts';
+import { readySecOf, usesGpu, GPU_READY_SEC, READY_SEC } from './engine.ts';
 import { merge } from '../settings.ts';
+import type { UsiOption } from './parse.ts';
 
 test('cp と勝率の往復（エンジンごとの目盛り）', () => {
   const e = { scale: 435, offsetCp: 34 };
@@ -21,6 +23,54 @@ test('id name からの提案（レシピ）', () => {
   assert.equal(recipeFor('Gikou 2'), null);
   assert.equal(presetOf({ scale: 600, offsetCp: 0 })?.id, 'generic');
   assert.equal(presetOf({ scale: 601, offsetCp: 0 }), null);
+});
+
+test('GPU のエンジンは申告で見分ける（名前ではなく DNN_ の項目）', () => {
+  const dl: UsiOption[] = [
+    { name: 'DNN_Model', type: 'filename', default: 'model.onnx' },
+    { name: 'UCT_Threads', type: 'spin', default: '2' },
+    { name: 'Eval_Coef', type: 'spin', default: '285' },
+  ];
+  const nnue: UsiOption[] = [
+    { name: 'Threads', type: 'spin', default: '4' },
+    { name: 'USI_Hash', type: 'spin', default: '1024' },
+  ];
+  assert.equal(usesGpu(dl), true);
+  assert.equal(usesGpu(nnue), false);
+  assert.equal(readySecOf({ gpu: true }), GPU_READY_SEC);
+  assert.equal(readySecOf({}), READY_SEC);
+  assert.equal(readySecOf({ gpu: true, readySec: 60 }), 60);
+  assert.equal(readySecOf({ readySec: 0 }), READY_SEC, '0 は指定なし扱い');
+});
+
+test('dlshogi 系の目盛りは Eval_Coef から読む（当てはめない）', () => {
+  const coef = 285;
+  const e = evalFromDeclaration([{ name: 'Eval_Coef', type: 'spin', default: String(coef) }])!;
+  assert.deepEqual(e, { scale: coef, offsetCp: 0 });
+  // エンジンは cp = Eval_Coef · ln(p/(1−p)) で出す。同じ式の逆なので勝率がそのまま戻る
+  for (const p of [0.05, 0.4, 0.5, 0.73, 0.99]) {
+    const cp = Math.round(coef * Math.log(p / (1 - p)));
+    assert.ok(Math.abs(cpToP(cp, e) - p) < 0.001, `p=${p}`);
+  }
+  assert.equal(evalFromDeclaration([{ name: 'Threads', type: 'spin', default: '4' }]), null);
+  assert.equal(evalFromDeclaration([{ name: 'Eval_Coef', type: 'spin', default: '0' }]), null);
+  assert.equal(recipeFor('dlshogi with HEROZ')?.name, 'dlshogi');
+  assert.equal(recipeFor('Fukauraou 8.30')?.name, 'ふかうら王');
+  // Eval_Coef を申告しない古い版（dlshogi with GCT）のための既定値。600 ではない
+  assert.deepEqual(recipeFor('dlshogi with GCT')?.eval, { scale: 756, offsetCp: 0 });
+});
+
+test('GPU の指定と待ち秒数は保存され、壊れた値は落ちる', () => {
+  const s = merge({
+    engines: [
+      { id: 'g', name: 'dl', path: '/x/dl', kind: 'normal', options: {}, gpu: true, readySec: 900, eval: { scale: 285, offsetCp: 0 } } as never,
+      { id: 'n', name: 'yane', path: '/x/yane', kind: 'normal', options: {}, gpu: false, readySec: -1, eval: { scale: 600, offsetCp: 0 } } as never,
+    ],
+  });
+  assert.equal(s.engines[0]!.gpu, true);
+  assert.equal(s.engines[0]!.readySec, 900);
+  assert.equal(s.engines[1]!.gpu, false, '外したのを「まだ決めていない」に戻さない');
+  assert.equal(s.engines[1]!.readySec, undefined);
 });
 
 test('以前の設定（threads/hashMb/evalDir と全体の winrate）を options と eval に写す', () => {

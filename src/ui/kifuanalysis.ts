@@ -44,7 +44,13 @@ export class KifuAnalyzer {
       this.pool.set(id, th);
     }
     if (th.state === 'stopped' || th.state === 'starting') {
-      await th.start();
+      // 起動の途中経過を進み具合の行に出す（GPU のエンジンは模型を読むのに何分もかかる）
+      th.onStatus = (text) => this.deps.onProgress(text);
+      try {
+        await th.start();
+      } finally {
+        th.onStatus = null;
+      }
       await th.newGame();
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', 1);
     }

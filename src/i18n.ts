@@ -363,6 +363,7 @@ const DICT = {
   pl_engine_error: { ja: 'エンジンが指せない: {msg}', en: 'The engine cannot move: {msg}' },
   pl_engine_gone: { ja: 'エンジンが登録から消えている', en: 'The engine is no longer registered' },
   pl_starting: { ja: '{name} を起動しています…', en: 'Starting {name}…' },
+  pl_starting_note: { ja: '{name}: {text}', en: '{name}: {text}' },
   pl_declare_win: {
     ja: '{name} が入玉宣言をしました（このアプリでは扱えないので投了として記録します）',
     en: '{name} declared an entering-king win (this app cannot judge it, so it is recorded as a resignation)',
@@ -378,7 +379,38 @@ const DICT = {
   },
   eng_started: { ja: '起動: {path}', en: 'Started: {path}' },
   eng_exited_log: { ja: '終了した', en: 'Exited' },
+  eng_exited_code_log: { ja: '終了した（終了コード {code}）', en: 'Exited (exit code {code})' },
   eng_exited: { ja: 'エンジンが終了した', en: 'The engine exited' },
+  eng_exited_code: {
+    ja: 'エンジンが終了した（終了コード {code}）。GPU のエンジンなら CUDA・TensorRT・cuDNN の DLL が揃っているか確かめる',
+    en: 'The engine exited (exit code {code}). For a GPU engine, check that the CUDA / TensorRT / cuDNN libraries are all present',
+  },
+  eng_loading: { ja: '準備しています（isready）…', en: 'Getting ready (isready)…' },
+  eng_loading_gpu: {
+    ja: '模型を GPU に載せています…（初回は数分〜十数分かかります）',
+    en: 'Loading the network onto the GPU… (the first time takes several minutes)',
+  },
+  eng_ready_timeout: {
+    ja: '準備（isready）が {sec} 秒で終わらなかった。GPU のエンジンは初回に時間がかかる。エンジンの設定の「準備を待つ秒数」を増やして試す',
+    en: 'Getting ready (isready) did not finish within {sec} s. A GPU engine is slow the first time — raise “Seconds to wait for isready” in the engine settings and try again',
+  },
+  eng_gpu_busy: {
+    ja: 'GPU を使うエンジンは同時に 1 本だけです。いま「{name}」が読んでいるので、そちらを止めてからにしてください',
+    en: 'Only one GPU engine runs at a time, and “{name}” is thinking right now. Stop it first',
+  },
+  eng_gpu_starting: {
+    ja: 'GPU を使うエンジンは同時に 1 本だけです。いま「{name}」が準備しているので、終わるまで待ってください',
+    en: 'Only one GPU engine runs at a time, and “{name}” is still getting ready. Wait until it finishes',
+  },
+  eng_gpu_in_game: {
+    ja: 'GPU を使うエンジンは同時に 1 本だけです。「{name}」が対局で使っているので、対局を終えてから検討してください',
+    en: 'Only one GPU engine runs at a time, and “{name}” is playing the game. Finish the game before analysing with it',
+  },
+  eng_gpu_freed: { ja: 'GPU を空けています（「{name}」を終了）…', en: 'Freeing the GPU (closing “{name}”)…' },
+  eng_gpu_freed_log: {
+    ja: 'GPU は 1 本だけなので、空いていた「{name}」を終了した',
+    en: 'Only one GPU engine can run, so the idle “{name}” was closed',
+  },
   eng_stale_bestmove: { ja: '止めたあとに遅れて届いた bestmove を捨てた: {line}', en: 'Dropped a bestmove that arrived after the stop: {line}' },
   eng_extra_bestmove: { ja: '余計な bestmove を捨てた: {line}', en: 'Dropped an unexpected bestmove: {line}' },
   eng_no_response: { ja: 'エンジンが {sec} 秒応答しない', en: 'No answer from the engine for {sec} s' },
@@ -440,7 +472,10 @@ const DICT = {
     ja: '評価関数は EvalDir。水匠5を FV_SCALE 16 で使うなら目盛りを 435 / +34 に',
     en: 'The evaluation function comes from EvalDir. For Suisho5 at FV_SCALE 16, set the scale to 435 / +34',
   },
-  rc_dl_note: { ja: '勝率を 600 で cp に直して出す', en: 'Converts the win rate to cp with a factor of 600' },
+  rc_dl_note: {
+    ja: '勝率を Eval_Coef（既定 756）倍して cp に直して出す',
+    en: 'Converts the win rate to cp by multiplying by Eval_Coef (756 by default)',
+  },
 
   // ---- エンジンの窓 ----
   en_title: { ja: 'エンジン', en: 'Engines' },
@@ -462,12 +497,15 @@ const DICT = {
     en: 'Nothing registered yet. Placement uses the built-in evaluator, but analysis and play from move 41 need an engine.',
   },
   en_kind_fuseki: { ja: '布石にも対応', en: 'Placement too' },
+  en_gpu_badge: { ja: 'GPU', en: 'GPU' },
   en_kind_normal: { ja: '本将棋', en: 'Shogi' },
   en_default_normal: { ja: '本将棋の既定', en: 'Default for shogi' },
   en_default_fuseki: { ja: '布石の既定', en: 'Default for placement' },
   en_opt_hash: { ja: 'ハッシュ', en: 'Hash' },
   en_opt_threads: { ja: 'スレッド', en: 'Threads' },
   en_opt_eval: { ja: '評価関数', en: 'Eval' },
+  en_opt_model: { ja: '模型', en: 'Network' },
+  en_opt_batch: { ja: 'バッチ', en: 'Batch' },
   en_noname: { ja: '(名前なし)', en: '(no name)' },
   en_scale_meta: { ja: '勝率の目盛り {scale} / {offset}', en: 'Win-rate scale {scale} / {offset}' },
   en_edit: { ja: '設定', en: 'Settings' },
@@ -511,6 +549,17 @@ const DICT = {
     en: 'Startup arguments (usually empty; for wsl.exe, e.g. <code>-d Ubuntu-24.04 -- /home/you/engine</code>)',
   },
   en_cwd: { ja: '作業フォルダ（空なら実行ファイルの場所）', en: 'Working folder (empty means where the executable is)' },
+  en_gpu_legend: { ja: 'GPU で読むエンジン', en: 'Engine that thinks on the GPU' },
+  en_gpu_label: { ja: 'GPU（DNN）を使う', en: 'Uses the GPU (DNN)' },
+  en_gpu_hint: {
+    ja: 'dlshogi・ふかうら王など。同時に 1 本だけ立てます（VRAM は席の数だけ増えません）。申告に DNN_ の項目があれば自動で付きます',
+    en: 'dlshogi, Fukauraou and the like. Only one runs at a time (VRAM does not grow with the number of seats). It is set automatically when the engine declares DNN_ options',
+  },
+  en_ready_sec: { ja: '準備を待つ秒数（isready）', en: 'Seconds to wait for isready' },
+  en_ready_sec_hint: {
+    ja: '空なら GPU で {gpu} 秒、それ以外は {cpu} 秒。初回に模型を GPU 向けに組み直すエンジンはここを延ばします',
+    en: 'Empty means {gpu} s for GPU engines and {cpu} s otherwise. Raise it for engines that rebuild the network for your GPU on first run',
+  },
   en_eval_legend: { ja: '評価値から勝率への目盛り', en: 'Scale from evaluation to win rate' },
   en_preset: { ja: '型', en: 'Preset' },
   en_preset_custom: { ja: '手で指定', en: 'Set by hand' },
@@ -542,6 +591,15 @@ const DICT = {
     ja: 'やねうら王＋水匠5 を公式の配布先から取って登録します（約 40MB）',
     en: 'Downloads YaneuraOu + Suisho5 from their official releases and registers them (about 40 MB)',
   },
+  su_install_gpu: { ja: 'GPU で読むエンジンを入れる', en: 'Install a GPU engine' },
+  su_install_gpu_hint: {
+    ja: 'dlshogi with GCT を公式の配布先から取って登録します（約 67MB）。DirectX 12 の GPU が要ります（NVIDIA でなくても動きます）。初回の起動は模型の読み込みで数分かかります',
+    en: 'Downloads dlshogi with GCT from its official release and registers it (about 67 MB). It needs a DirectX 12 GPU (it does not have to be NVIDIA). The first start takes a few minutes while the network loads',
+  },
+  su_installed_gpu: {
+    ja: '入りました。{name} を登録しました（初回の起動は模型の読み込みで数分かかります）',
+    en: 'Installed. {name} is registered (its first start takes a few minutes while the network loads)',
+  },
   su_manual_head: { ja: '自分で入れるなら', en: 'Installing it yourself' },
   su_manual_body: {
     ja: '実行ファイルをエンジンのフォルダに置いて「エンジン」→「フォルダから取り込む」。やねうら王なら隣に <code>eval/nn.bin</code>（水匠5）を置き、目盛りは <b>652 / +51</b>。',
@@ -560,6 +618,7 @@ const DICT = {
   su_engines_btn: { ja: 'エンジンの登録', en: 'Register engines' },
   su_update_btn: { ja: '更新を確認', en: 'Check for updates' },
   su_app_only: { ja: 'アプリの中でだけできます', en: 'Only possible inside the app' },
+  su_stopping: { ja: '動いているエンジンを止めています…', en: 'Stopping the engines that are running…' },
   su_starting: { ja: '始めています…', en: 'Starting…' },
   su_registering: { ja: '登録しています…', en: 'Registering…' },
   su_note_percent: { ja: '{text}（{percent}%）', en: '{text} ({percent}%)' },

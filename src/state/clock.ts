@@ -75,6 +75,11 @@ export class Clock {
     this.stopTimer();
   }
 
+  /** 止めているか（エンジンの起動待ちで止めた時計を、二重に動かさないため） */
+  get isPaused(): boolean {
+    return this.pausedAt !== null;
+  }
+
   /** 一時停止から続ける。止めていた分だけ開始時刻をずらす */
   resume(): void {
     if (this.pausedAt === null) return;

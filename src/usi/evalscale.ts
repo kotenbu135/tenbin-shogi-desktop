@@ -9,6 +9,7 @@
 // 一般的な 600 / 0 で始め、利用者が変えられる。
 
 import type { Key } from '../i18n.ts';
+import type { UsiOption } from './parse.ts';
 
 export interface EvalScale {
   /** ロジスティックの幅。p = 1 / (1 + exp(−(cp − offset) / scale)) */
@@ -26,6 +27,19 @@ export function cpToP(cp: number, e: EvalScale = DEFAULT_EVAL): number {
 export function pToCp(p: number, e: EvalScale = DEFAULT_EVAL): number {
   const q = Math.min(Math.max(p, 1e-6), 1 - 1e-6);
   return Math.round(e.scale * Math.log(q / (1 - q)) + e.offsetCp) || 0;
+}
+
+/**
+ * 申告から目盛りを読む。dlshogi 系は勝率をそのまま cp に直して出しており、
+ * その係数を `Eval_Coef` として申告する（cp = Eval_Coef · ln(p/(1−p))）。
+ * こちらの式 p = 1/(1+exp(−(cp − offset)/scale)) の逆なので、scale = Eval_Coef・offset = 0 で
+ * ぴったり戻せる。当てはめではなく、エンジンが言った値をそのまま使う。
+ */
+export function evalFromDeclaration(options: UsiOption[]): EvalScale | null {
+  const o = options.find((x) => x.name === 'Eval_Coef');
+  const v = Number(o?.default);
+  if (!o || !Number.isFinite(v) || v <= 0) return null;
+  return { scale: v, offsetCp: 0 };
 }
 
 export interface EvalPreset {
@@ -65,7 +79,10 @@ export const RECIPES: Recipe[] = [
   { test: /Tenbin Fuseki Engine/i, name: '布石エンジン', eval: { scale: 435, offsetCp: 34 }, kind: 'fuseki', noteKey: 'rc_fuseki_note' },
   { test: /Suisho\s*5|水匠5/i, name: '水匠5', eval: { scale: 652, offsetCp: 51 }, kind: 'normal', noteKey: 'rc_suisho_note' },
   { test: /YaneuraOu/i, name: 'やねうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_yane_note' },
-  { test: /dlshogi|Fukauraou|ふかうら王/i, name: 'ふかうら王', eval: { scale: 600, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_dl_note' },
+  // 756 は dlshogi が勝率を cp に直すときの係数（UctSearch.cpp の定数で、新しい版では
+  // Eval_Coef の既定値）。申告に Eval_Coef があればそちらが優先される
+  { test: /Fukauraou|ふかうら王/i, name: 'ふかうら王', eval: { scale: 756, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_dl_note' },
+  { test: /dlshogi|GCT/i, name: 'dlshogi', eval: { scale: 756, offsetCp: 0 }, kind: 'normal', noteKey: 'rc_dl_note' },
 ];
 
 export function recipeFor(idName: string): Recipe | null {

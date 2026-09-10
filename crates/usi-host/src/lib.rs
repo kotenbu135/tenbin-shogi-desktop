@@ -30,7 +30,9 @@ pub enum EngineEvent {
 pub type EventSink = Arc<dyn Fn(EngineEvent) + Send + Sync + 'static>;
 
 struct Running {
-    child: Child,
+    /// 終了を待つスレッドと共有する。stop は殺す側、待つ側は終了コードを読む側。
+    /// `Child` は一度 wait した結果を自分の中に持つので、どちらが先でも同じ答えになる。
+    child: Arc<Mutex<Child>>,
     stdin: ChildStdin,
 }
 
@@ -104,6 +106,9 @@ impl EngineHost {
         spawn_reader(id.to_string(), stdout, sink.clone(), Stream::Stdout);
         spawn_reader(id.to_string(), stderr, sink.clone(), Stream::Stderr);
 
+        let child = Arc::new(Mutex::new(child));
+        spawn_waiter(id.to_string(), child.clone(), sink.clone());
+
         self.engines
             .lock()
             .unwrap()
@@ -139,12 +144,14 @@ impl EngineHost {
         drop(r.stdin);
         let deadline = Instant::now() + grace;
         loop {
-            match r.child.try_wait() {
+            let st = r.child.lock().unwrap().try_wait();
+            match st {
                 Ok(Some(_)) => return Ok(()),
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
                 Ok(None) => {
-                    let _ = r.child.kill();
-                    let _ = r.child.wait();
+                    let mut c = r.child.lock().unwrap();
+                    let _ = c.kill();
+                    let _ = c.wait();
                     return Ok(());
                 }
                 Err(e) => return Err(format!("終了を待てない: {e}")),
@@ -202,11 +209,27 @@ where
                 }
             }
         }
-        // stdout の EOF をプロセス終了の合図にする。stderr 側は Exit を出さない
-        // （二重に出ると GUI が二度「落ちた」と表示する）。
-        if let Stream::Stdout = stream {
-            sink(EngineEvent::Exit { id, code: None });
-        }
+        // EOF では Exit を出さない。出すのは process の死を待つスレッド（spawn_waiter）だけで、
+        // そちらは終了コードを持って出せる。二重に出すと GUI が二度「落ちた」と表示する。
+    });
+}
+
+/// process の死を待って Exit を出す。
+///
+/// 終了コードは、何も言わずに落ちたエンジンの唯一の手がかりになる。GPU で読むエンジンは
+/// CUDA・cuDNN・TensorRT の DLL が揃っていないと、標準エラーに 1 行も出さずに即死する。
+fn spawn_waiter(id: String, child: Arc<Mutex<Child>>, sink: EventSink) {
+    thread::spawn(move || {
+        let code = loop {
+            // 錠は try_wait の間だけ持つ。ここで wait() を待つと、止めたい側（stop）が待たされる
+            let st = child.lock().unwrap().try_wait();
+            match st {
+                Ok(Some(s)) => break s.code(),
+                Ok(None) => thread::sleep(Duration::from_millis(50)),
+                Err(_) => break None,
+            }
+        };
+        sink(EngineEvent::Exit { id, code });
     });
 }
 
@@ -329,6 +352,31 @@ mod tests {
         let lines = wait(&|l| l.starts_with("bestmove"), 60);
         assert!(lines.iter().any(|l| l.starts_with("info") && l.contains("score")), "info score が無い");
         host.stop("y", Duration::from_secs(3)).unwrap();
+    }
+
+    /// 何も言わずに落ちたエンジンの手がかりは終了コードだけ。EOF ではなく死を待って拾うこと。
+    #[cfg(unix)]
+    #[test]
+    fn exit_code_is_reported() {
+        let host = EngineHost::new();
+        let (tx, rx) = mpsc::channel();
+        let sink: EventSink = Arc::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        host.start(
+            "dead",
+            Launch { path: PathBuf::from("/bin/sh"), args: vec!["-c".into(), "exit 7".into()], cwd: None },
+            sink,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "Exit が来ない");
+            if let Ok(EngineEvent::Exit { code, .. }) = rx.recv_timeout(Duration::from_secs(5)) {
+                assert_eq!(code, Some(7));
+                break;
+            }
+        }
     }
 
     #[test]

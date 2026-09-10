@@ -178,7 +178,14 @@ class Slot {
     this.thinker = th;
     if (th.state === 'stopped' || th.state === 'starting') {
       this.name.textContent = tr('an_starting');
-      await th.start();
+      // GPU のエンジンは模型を読むのに何分もかかる。途中経過を枠に出して、止まって見せない
+      th.onStatus = (text) => this.showNotice(text);
+      try {
+        await th.start();
+      } finally {
+        th.onStatus = null;
+        this.showNotice(null);
+      }
     }
     return th;
   }

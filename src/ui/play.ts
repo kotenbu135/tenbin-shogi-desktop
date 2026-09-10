@@ -87,6 +87,8 @@ export class MatchDriver {
     this.gen++;
     this.pendingKey = null;
     this.endThinking(t('th_paused'));
+    // ここで GPU の印は外さない。止めている間に検討へ渡してしまうと、「再開」で取り返せず
+    // （検討が読んでいる最中は譲らない）、対局が止まったままになる
     this.deps.onPause();
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
   }
@@ -138,6 +140,7 @@ export class MatchDriver {
     this.endThinking(t('th_aborted'));
     this.seats = null;
     this.names = ['', '']; // 前の対局の名前を、読み込んだ棋譜や編集から始めた対局へ持ち越さない
+    this.freeReservations();
     await Promise.all([...this.thinkers.values()].map((t) => t.stop()));
   }
 
@@ -155,6 +158,11 @@ export class MatchDriver {
     const all = [...this.thinkers.values()];
     this.thinkers.clear();
     await Promise.all(all.map((t) => t.quit()));
+  }
+
+  /** 対局が握っている印を外す。GPU を使うエンジンを検討へ渡せるようにする */
+  private freeReservations(): void {
+    for (const th of this.thinkers.values()) th.reserved = false;
   }
 
   private endThinking(state: string): void {
@@ -217,6 +225,7 @@ export class MatchDriver {
 
   private async maybeMove(): Promise<void> {
     const g = this.deps.game();
+    if (g.phase === 'over') this.freeReservations(); // 終局したら GPU は検討へ渡してよい
     if (this.paused || !this.deps.live()) return;
     const cur = this.currentEngineSeat();
     if (!cur) return;
@@ -289,12 +298,42 @@ export class MatchDriver {
     const key = `${seat}:${id}`;
     let th = this.thinkers.get(key);
     if (!th) {
-      th = this.deps.createThinker(id, `play${seat}`) ?? undefined;
+      // 同じエンジンを先後で使う対局は、席ごとに 1 本ずつ立てるのが普通。ただし GPU で読むエンジンは
+      // 同時に 1 本しか立てられない（VRAM）ので、先後で同じ process を使い回す。
+      // 対局は手番が交互で 2 つの go が重ならないので成り立つ（検討と重ねるのは駄目）
+      const shared = [...this.thinkers.values()].find((x) => x.config.id === id && x.config.gpu);
+      th = shared ?? this.deps.createThinker(id, `play${seat}`) ?? undefined;
       if (!th) throw new Error(t('pl_engine_gone'));
       th.onLog = (dir, text) => this.deps.onLog(th!.config.name || th!.config.path, dir, text);
       this.thinkers.set(key, th);
     }
+    // 対局の持ち物であることを示す。GPU は 1 本しか立たないので、手番の合間に検討へ取られると
+    // 毎手 模型を読み直すことになる
+    th.reserved = true;
     return th;
+  }
+
+  /**
+   * 席のエンジンを立てる。GPU で読むエンジンは模型を読むのに何分もかかるので、そのあいだ時計を止める
+   * （起動を待っている側が、1 手も指さないうちに時間切れになるのを防ぐ）。
+   * 途中経過は状態の行に出す。何分も黙っていると、止まったのか動いているのか分からない。
+   */
+  private async ensureStarted(th: Thinker): Promise<void> {
+    if (th.state !== 'stopped' && th.state !== 'starting') return;
+    const name = th.config.name || th.config.path;
+    this.deps.say(t('pl_starting', { name }));
+    const clock = this.deps.clock();
+    const wasPaused = clock.isPaused;
+    if (!wasPaused) clock.pause();
+    th.onStatus = (text) => this.deps.say(t('pl_starting_note', { name, text }));
+    try {
+      await th.start();
+      await th.newGame();
+    } finally {
+      th.onStatus = null;
+      // 起動の途中で対局を止めていたら、そのまま止めておく（止めた側の時計を勝手に動かさない）
+      if (!wasPaused && !this.paused) clock.resume();
+    }
   }
 
   /**
@@ -321,11 +360,7 @@ export class MatchDriver {
     if (phase === 'normal') {
       if (!spec.normalId) return null; // 本将棋は人が指す
       const th = this.thinker(seat, spec.normalId);
-      if (th.state === 'stopped' || th.state === 'starting') {
-        this.deps.say(t('pl_starting', { name: th.config.name }));
-        await th.start();
-        await th.newGame();
-      }
+      await this.ensureStarted(th);
       this.sendMultiPv(th);
       const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
       if (bm.move === 'resign') return 'resign';
@@ -363,11 +398,7 @@ export class MatchDriver {
       return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin });
     }
     const th = this.thinker(seat, spec.fusekiId);
-    if (th.state === 'stopped' || th.state === 'starting') {
-      this.deps.say(t('pl_starting', { name: th.config.name }));
-      await th.start();
-      await th.newGame();
-    }
+    await this.ensureStarted(th);
     this.sendMultiPv(th);
     // 布石は天秤将棋と布石将棋で最初の 2 手の意味が違う。position 行からは区別できないので渡す
     if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');

@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     settings: () => settings,
     save: () => saveSettings(settings),
     openEngines: () => engineDialog.open(),
-    register: (path, name, evalScale) => engineDialog.addInstalled(path, name, evalScale),
+    register: (spec) => engineDialog.addInstalled(spec),
     say: (text, error) => say(text, error),
     beforeInstall: () => updateDeps.beforeInstall(),
   });

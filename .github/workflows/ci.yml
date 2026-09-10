@@ -55,5 +55,6 @@ jobs:
       - run: npm ci
       # generate_context! が dist/ を読むので、先に画面を作る
       - run: npm run build
-      # 配布物までは作らない（それは release.yml の仕事）。Rust 側が Windows で通ることだけ見る
-      - run: cargo check -p tenbin-shogi-gui
+      # 配布物までは作らない（それは release.yml の仕事）。Rust 側が Windows で通ることと、
+      # 書庫の取り出しのテストが通ることを見る（check ではなく test なのはそのため）
+      - run: cargo test -p tenbin-shogi-gui

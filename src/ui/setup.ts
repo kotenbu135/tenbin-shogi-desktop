@@ -8,12 +8,20 @@
 import { t } from '../i18n.ts';
 import { isTauri } from '../usi/engine.ts';
 import type { Settings } from '../settings.ts';
+import type { InstallSpec } from './engines.ts';
 import { checkUpdate, currentVersion } from './update.ts';
 
 /** 自動で入れるもの（やねうら王の実行ファイル ＋ 水匠5 の評価関数） */
 const AUTO_NAME = 'やねうら王＋水匠5';
 /** 水匠5 の評価関数は FV_SCALE 24 が最適（配布元の説明）。その目盛り */
 const AUTO_EVAL = { scale: 652, offsetCp: 51 };
+/** GPU で読むほう（dlshogi with GCT。実行ファイル・DLL・モデルが 1 つの書庫に入っている） */
+const GPU_NAME = 'dlshogi with GCT';
+/**
+ * dlshogi は勝率を cp に直すとき 756 倍する（配布元のソースの定数。新しい版では
+ * Eval_Coef の既定値として申告される）。当てはめではなく、その式の逆をそのまま使う
+ */
+const GPU_EVAL = { scale: 756, offsetCp: 0 };
 
 export interface SetupDeps {
   settings(): Settings;
@@ -21,7 +29,7 @@ export interface SetupDeps {
   /** エンジンの登録を開く */
   openEngines(): void;
   /** 取り込んだエンジンを登録する。戻り値は申告を読めなかったときの理由 */
-  register(path: string, name: string, evalScale: { scale: number; offsetCp: number }): Promise<string | null>;
+  register(spec: InstallSpec): Promise<string | null>;
   /** 状態の行に出す */
   say(text: string, error?: boolean): void;
   /** 更新を入れ替える直前にエンジンを止める */
@@ -54,7 +62,10 @@ export class SetupDialog {
           this.dialog.close();
           break;
         case 'install':
-          void this.install();
+          void this.install(false);
+          break;
+        case 'install-gpu':
+          void this.install(true);
           break;
         case 'engines':
           this.dialog.close();
@@ -83,27 +94,44 @@ export class SetupDialog {
     if (el) el.textContent = this.lastNote;
   }
 
-  /** やねうら王＋水匠5 を取ってきて登録する */
-  private async install(): Promise<void> {
+  /**
+   * エンジンを取ってきて登録する。CPU（やねうら王＋水匠5）と GPU（dlshogi with GCT）の
+   * 違いは「どの命令を呼び、どう登録するか」だけなので、待ち方と知らせ方はここに 1 つ持つ。
+   */
+  private async install(gpu: boolean): Promise<void> {
     if (this.installing) return;
     if (!isTauri()) {
       this.note(t('su_app_only'));
       return;
     }
     this.installing = true;
-    const btn = this.dialog.querySelector<HTMLButtonElement>('[data-act="install"]');
-    if (btn) btn.disabled = true;
+    this.setButtons(true);
     let un: (() => void) | null = null;
+    const name = gpu ? GPU_NAME : AUTO_NAME;
     try {
       const { listen } = await import('@tauri-apps/api/event');
       const { invoke } = await import('@tauri-apps/api/core');
       un = await listen<{ text: string; percent: number }>('engine-install', (e) => this.note(e.payload.text, e.payload.percent));
+      // 動いているエンジンは止める。Windows は走っている実行ファイルを上書きさせないので、
+      // 入れ直しが「アクセスが拒否されました」で終わる（GPU のエンジンは検討を止めても残っている）
+      this.note(t('su_stopping'), 0);
+      await this.deps.beforeInstall();
       this.note(t('su_starting'), 0);
-      const path = await invoke<string>('install_recommended_engine');
+      const spec: InstallSpec = gpu
+        ? await (async () => {
+            // GPU のほうはモデルの場所も返る。DNN_Model は既定のままだとモデルを見つけられない
+            const r = await invoke<{ exe: string; model: string }>('install_gpu_engine');
+            return { path: r.exe, name: GPU_NAME, eval: GPU_EVAL, options: { DNN_Model: r.model }, makeDefault: 'if-none' as const };
+          })()
+        : { path: await invoke<string>('install_recommended_engine'), name: AUTO_NAME, eval: AUTO_EVAL, makeDefault: 'always' as const };
       this.note(t('su_registering'), 100);
-      const err = await this.deps.register(path, AUTO_NAME, AUTO_EVAL);
-      this.note(err ? t('su_installed_but_failed', { msg: err }) : t('su_installed', { name: AUTO_NAME }));
-      this.deps.say(err ? t('su_say_failed', { msg: err }) : t('su_say_installed', { name: AUTO_NAME }), !!err);
+      const err = await this.deps.register(spec);
+      // 既定にしたかどうかは登録のあとの設定を見る（GPU のほうは、既定が無いときだけ既定になる）
+      const st = this.deps.settings();
+      const isDefault = st.engines.some((e) => e.path === spec.path && e.id === st.normalEngineId);
+      const done = isDefault ? t('su_installed', { name }) : t('su_installed_gpu', { name });
+      this.note(err ? t('su_installed_but_failed', { msg: err }) : done);
+      this.deps.say(err ? t('su_say_failed', { msg: err }) : t('su_say_installed', { name }), !!err);
       this.paint();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -111,8 +139,14 @@ export class SetupDialog {
     } finally {
       un?.();
       this.installing = false;
-      const b = this.dialog.querySelector<HTMLButtonElement>('[data-act="install"]');
-      if (b) b.disabled = false;
+      this.setButtons(false);
+    }
+  }
+
+  /** 取り込みの間はどちらのボタンも押させない（2 本同時に取りに行かせない） */
+  private setButtons(disabled: boolean): void {
+    for (const b of this.dialog.querySelectorAll<HTMLButtonElement>('[data-act="install"], [data-act="install-gpu"]')) {
+      b.disabled = disabled;
     }
   }
 
@@ -134,6 +168,10 @@ export class SetupDialog {
           <div class="setup-actions">
             <button type="button" class="primary" data-act="install">${t('su_install')}</button>
             <span class="hint">${t('su_install_hint')}</span>
+          </div>
+          <div class="setup-actions">
+            <button type="button" data-act="install-gpu">${t('su_install_gpu')}</button>
+            <span class="hint">${t('su_install_gpu_hint')}</span>
           </div>
           <div class="install-note">${escapeHtml(this.lastNote)}</div>
         </section>

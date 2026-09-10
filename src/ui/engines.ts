@@ -4,10 +4,21 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { t } from '../i18n.ts';
-import { COMMON_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, type EngineConfig, type EngineKind } from '../usi/engine.ts';
-import { EVAL_PRESETS, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
+import { COMMON_OPTIONS, GPU_READY_SEC, READY_SEC, SUMMARY_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, usesGpu, type EngineConfig, type EngineKind } from '../usi/engine.ts';
+import { EVAL_PRESETS, evalFromDeclaration, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
 import { BUILTIN_ID, type Settings } from '../settings.ts';
+import type { Key } from '../i18n.ts';
+
+/** 一覧の見出しに出す項目の呼び名。表に無い項目は名前をそのまま出す */
+const OPTION_LABELS: Record<string, Key> = {
+  Threads: 'en_opt_threads',
+  UCT_Threads: 'en_opt_threads',
+  USI_Hash: 'en_opt_hash',
+  EvalDir: 'en_opt_eval',
+  DNN_Model: 'en_opt_model',
+  DNN_Batch_Size: 'en_opt_batch',
+};
 
 export interface EngineDialogDeps {
   settings(): Settings;
@@ -21,6 +32,17 @@ export interface EngineDialogDeps {
 interface FoundExecutable {
   path: string;
   name: string;
+}
+
+/** 自動で取り込んだエンジンの登録のしかた。名前も目盛りも「入れる側」が決める */
+export interface InstallSpec {
+  path: string;
+  name: string;
+  eval: EvalScale;
+  /** setoption の上書き。取り込んだ側しか知らない場所（モデルのファイルなど） */
+  options?: Record<string, string>;
+  /** 本将棋の既定にするか。'if-none' は既定がまだ無いときだけ（利用者の選択を上書きしない） */
+  makeDefault: 'always' | 'if-none';
 }
 
 export class EngineDialog {
@@ -78,11 +100,15 @@ export class EngineDialog {
       badges.push(`<span class="engine-kind">${t(e.kind === 'fuseki' ? 'en_kind_fuseki' : 'en_kind_normal')}</span>`);
       if (e.kind === 'normal' && normalDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_normal')}</span>`);
       if (e.kind === 'fuseki' && s.fusekiEngineId === e.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
-      const opts = ['Threads', 'USI_Hash', 'EvalDir'].map((k) => {
+      if (e.gpu) badges.push(`<span class="engine-gpu">${t('en_gpu_badge')}</span>`);
+      // 出す項目はエンジンによって違う（NNUE は Threads/USI_Hash、GPU のものは UCT_Threads/DNN_Model）。
+      // 持っているものだけを頭から 3 つ出す
+      const opts = SUMMARY_OPTIONS.map((k) => {
         const v = optionValue(e, k);
-        const label = t(k === 'USI_Hash' ? 'en_opt_hash' : k === 'Threads' ? 'en_opt_threads' : 'en_opt_eval');
-        return v ? `${label} ${esc(v)}${k === 'USI_Hash' ? 'MB' : ''}` : '';
-      }).filter(Boolean);
+        if (!v) return '';
+        const label = OPTION_LABELS[k] ? t(OPTION_LABELS[k]!) : k;
+        return `${label} ${esc(k === 'DNN_Model' || k === 'EvalDir' ? basename(v) : v)}${k === 'USI_Hash' ? 'MB' : ''}`;
+      }).filter(Boolean).slice(0, 3);
       li.innerHTML = `
         <div class="engine-name">${esc(e.name || t('en_noname'))} ${badges.join(' ')}${e.idName ? `<span class="engine-idname">${esc(e.idName)}</span>` : ''}</div>
         <div class="engine-path">${esc(e.path)}${e.args ? ' ' + esc(e.args) : ''}</div>
@@ -136,21 +162,27 @@ export class EngineDialog {
     this.dialog.innerHTML = `<div class="dialog-body"><div class="dialog-head"><h2>${t('en_title')}</h2></div><p class="hint">${esc(text)}</p></div>`;
   }
 
-  /** 取り込んだばかりのエンジンを登録して、本将棋の既定にする */
-  async addInstalled(path: string, name: string, evalScale: EvalScale): Promise<string | null> {
+  /** 取り込んだばかりのエンジンを登録する。戻り値は申告を読めなかったときの理由 */
+  async addInstalled(spec: InstallSpec): Promise<string | null> {
     const cfg = newEngineConfig();
-    cfg.path = path;
-    cfg.name = name;
+    cfg.path = spec.path;
+    cfg.name = spec.name;
     const err = await this.probeInto(cfg, false);
     cfg.kind = 'normal';
-    cfg.eval = { ...evalScale };
+    cfg.eval = { ...spec.eval };
+    // 取り込んだものだけが知っている場所（モデルのファイルなど）を入れる。
+    // 申告の既定と同じ値は持たない（applyOptions が送らない）ので、上書きだけを残す
+    for (const [k, v] of Object.entries(spec.options ?? {})) {
+      if (cfg.declared?.find((o) => o.name === k)?.default !== v) cfg.options[k] = v;
+    }
     const s = this.deps.settings();
     // 同じ場所のものは置き換える（入れ直しても増やさない）
-    const i = s.engines.findIndex((e) => e.path === path);
+    const i = s.engines.findIndex((e) => e.path === spec.path);
     if (i >= 0) cfg.id = s.engines[i]!.id;
     if (i >= 0) s.engines[i] = cfg;
     else s.engines.push(cfg);
-    s.normalEngineId = cfg.id;
+    const hasDefault = s.engines.some((e) => e.id === s.normalEngineId && e.kind === 'normal');
+    if (spec.makeDefault === 'always' || !hasDefault) s.normalEngineId = cfg.id;
     await this.persist();
     return err;
   }
@@ -181,9 +213,15 @@ export class EngineDialog {
       const recipe = r.idName ? recipeFor(r.idName) : null;
       const fusekiCapable = r.options.some((o) => /^Fuseki_/.test(o.name));
       cfg.kind = fusekiCapable ? 'fuseki' : (recipe?.kind ?? 'normal');
+      // GPU で読むかは名前ではなく申告で決める（同じ dlshogi でも配布物ごとに名前が違う）。
+      // 利用者が決めたあと（true でも false でも）は、読み直しても引っくり返さない
+      if (cfg.gpu === undefined) cfg.gpu = usesGpu(r.options);
       if (proposeName) {
         cfg.name = recipe?.name ?? r.idName ?? basename(cfg.path).replace(/\.exe$/i, '');
-        if (recipe) cfg.eval = { ...recipe.eval };
+        // 申告から読める目盛りが最優先。dlshogi 系は Eval_Coef をそのまま S に使える（当てはめが要らない）
+        const declaredEval = evalFromDeclaration(r.options);
+        if (declaredEval) cfg.eval = declaredEval;
+        else if (recipe) cfg.eval = { ...recipe.eval };
       }
       return null;
     } catch (e) {
@@ -279,6 +317,15 @@ export class EngineDialog {
             <span class="path-row"><input name="cwd" value="${esc(cfg.cwd ?? '')}" /><button type="button" data-pick="cwd">${t('en_browse')}</button></span>
           </label>
         </details>
+        <fieldset class="engine-gpu-box">
+          <legend>${t('en_gpu_legend')}</legend>
+          <label class="inline-check"><input type="checkbox" name="gpu" ${cfg.gpu ? 'checked' : ''} /> ${t('en_gpu_label')}</label>
+          <p class="hint">${t('en_gpu_hint')}</p>
+          <label>${t('en_ready_sec')}
+            <input name="readySec" type="number" min="10" max="7200" value="${cfg.readySec ?? ''}" placeholder="${cfg.gpu ? GPU_READY_SEC : READY_SEC}" />
+          </label>
+          <p class="hint">${t('en_ready_sec_hint', { gpu: GPU_READY_SEC, cpu: READY_SEC })}</p>
+        </fieldset>
         <fieldset class="eval-scale">
           <legend>${t('en_eval_legend')}</legend>
           <div class="form-row">
@@ -364,6 +411,11 @@ export class EngineDialog {
     cfg.args = str('args') || undefined;
     cfg.cwd = str('cwd') || undefined;
     cfg.kind = (str('kind') as EngineKind) || 'normal';
+    // 外した（false）と、まだ決めていない（undefined）は違う。false は申告の読み直しで戻さない
+    cfg.gpu = (form.elements.namedItem('gpu') as HTMLInputElement | null)?.checked ?? false;
+    const ready = Number(str('readySec'));
+    // 保存する値と実際に待つ値をずらさない（下限は readySecOf と同じ 10 秒）
+    cfg.readySec = Number.isFinite(ready) && ready > 0 ? Math.max(10, Math.round(ready)) : undefined;
     const scale = Number(fd.get('scale'));
     const offset = Number(fd.get('offset'));
     cfg.eval = { scale: Number.isFinite(scale) && scale > 0 ? scale : 600, offsetCp: Number.isFinite(offset) ? offset : 0 };
@@ -422,8 +474,9 @@ function optionRow(o: UsiOption, override: string | undefined): string {
       control = `<span class="hint">${t('en_opt_button')}</span>`;
       break;
     default: {
-      const pathLike = /(Dir|File|Path)$/i.test(o.name) || o.type === 'filename';
-      const dir = /Dir$/i.test(o.name);
+      // GPU のエンジンの模型は DNN_Model・DNN_Model2… で、名前が Dir/File/Path で終わらない
+      const pathLike = /(Dir|File|Path|Model)\d*$/i.test(o.name) || o.type === 'filename';
+      const dir = /Dir\d*$/i.test(o.name);
       control = `<span class="path-row"><input type="text" name="${esc(id)}" value="${esc(cur)}" spellcheck="false" />${pathLike && isTauri() ? `<button type="button" data-opt-pick="${esc(id)}" data-opt-dir="${dir ? 1 : 0}">${t('en_browse')}</button>` : ''}</span>`;
     }
   }

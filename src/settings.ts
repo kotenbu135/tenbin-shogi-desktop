@@ -129,6 +129,8 @@ export function migrateEngine(raw: LegacyEngine, globalEval?: EvalScale): Engine
     args: raw.args || undefined,
     cwd: raw.cwd || undefined,
     kind: raw.kind === 'fuseki' ? 'fuseki' : 'normal',
+    gpu: typeof raw.gpu === 'boolean' ? raw.gpu : undefined,
+    readySec: typeof raw.readySec === 'number' && raw.readySec > 0 ? raw.readySec : undefined,
     options,
     declared: Array.isArray(raw.declared) ? (raw.declared as UsiOption[]) : undefined,
     idName: raw.idName,
