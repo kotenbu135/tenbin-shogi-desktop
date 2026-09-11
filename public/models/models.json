@@ -1,9 +1,22 @@
 {
   "format": "tenbin-models/1",
-  "generation": "iter1177",
-  "policy": { "file": "fuseki_degct_b3_iter1177.onnx", "sha256": "5bf176c6e01ccdf7de87a275833faeeebee25b77824d72d5a90f139aee1626a0", "outputs": 648 },
-  "kings": { "file": "king_pairs_iter1177_games.json", "sha256": "e9275ecacbd2540ab303c9ecf82aac30c4dd7a3147097ac1a115dd3c6a129618" },
-  "value": { "file": "value_mid_iter1400_t40.onnx", "sha256": "73263d1f1f9926feac9f6642541397ad508e8b86bba0828a04c063e4c09e0464", "net": "6x64", "heldout": "iter1400+", "auc": 0.6945 },
+  "generation": "iter2455",
+  "policy": {
+    "file": "fuseki_degct_b3_iter2455.onnx",
+    "sha256": "1178658eda61793b35374ae0e173dd1d7ed789bb564b700c84936381d8c3a30a",
+    "outputs": 648
+  },
+  "kings": {
+    "file": "king_pairs_iter2455_games.json",
+    "sha256": "22715a6bd29a4b8149c99b29164335cb12dda2b07ecace97dea32a958c482a21"
+  },
+  "value": {
+    "file": "value_mid_iter1400_t40.onnx",
+    "sha256": "73263d1f1f9926feac9f6642541397ad508e8b86bba0828a04c063e4c09e0464",
+    "net": "6x64",
+    "heldout": "iter1400+",
+    "auc": 0.6945
+  },
   "license": "GPL-3.0-only",
   "origin": "乱数初期化から自分の対局記録だけで学習した自作物。GCT 由来のパラメータを含まない。公開サイト fuseki-shogi-web の models/ と同じファイル",
   "same_as": "https://github.com/kotenbu135/fuseki-shogi-web/tree/main/models"
