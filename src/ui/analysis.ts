@@ -12,7 +12,7 @@ import type { EngineConfig, EngineState, Thinker } from '../usi/engine.ts';
 import { cpToP, pToCp } from '../usi/evalscale.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import type { Color, Mode, Phase } from '../state/game.ts';
-import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
+import { BUILTIN_ID, isBuiltinId, normalEngine, type Settings } from '../settings.ts';
 import { MAX_SCORE, type EvalSource } from './graph.ts';
 
 export interface AnalysisLine {
@@ -621,8 +621,11 @@ export class AnalysisPanel {
       };
       add(AUTO, tr('an_auto'));
       add(BUILTIN_ID, tr('bi_name'));
+      // 足した模型一式（世代）も欄に置ける。欄を 2 つ並べれば世代どうしの読みを見比べられる
+      for (const m of st.modelSets) add(m.id, tr('ng_builtin_models', { name: m.name }));
       for (const e of st.engines) add(e.id, e.name || e.path);
-      sel.value = cur === AUTO || cur === BUILTIN_ID || st.engines.some((e) => e.id === cur) ? cur : AUTO;
+      sel.value =
+        cur === AUTO || cur === BUILTIN_ID || st.modelSets.some((m) => m.id === cur) || st.engines.some((e) => e.id === cur) ? cur : AUTO;
       s.engineId = sel.value;
     }
     this.addBtn.disabled = this.slots.length >= MAX_SLOTS;
@@ -631,7 +634,7 @@ export class AnalysisPanel {
   private canAnalyze(cfg: EngineConfig, t: Target): string | null {
     if (t.stage === 'choose') return tr('an_cannot_choose');
     if (t.stage !== 'normal' && cfg.kind !== 'fuseki') return tr('an_cannot_fuseki');
-    if (t.stage === 'normal' && cfg.id === BUILTIN_ID) return tr('an_cannot_normal');
+    if (t.stage === 'normal' && isBuiltinId(cfg.id)) return tr('an_cannot_normal');
     return null;
   }
 

@@ -194,6 +194,18 @@ const DICT = {
   },
   msg_builtin_kings: { ja: ' / 両玉の価値表', en: ' / king-pair table' },
   msg_builtin_failed: { ja: '内蔵の布石評価を読めない: {msg}', en: 'Cannot load the built-in placement evaluator: {msg}' },
+  msg_models_loaded: {
+    ja: '布石の模型 {name}（{dir}）: 方策 {policy} / 価値ネット {value}{kings}',
+    en: 'Placement models {name} ({dir}): policy {policy} / value net {value}{kings}',
+  },
+  msg_models_no_kings: {
+    ja: '布石の模型 {name}: 両玉の価値表を使えない（{msg}）。天秤将棋の 1〜2 手目は価値ネットで代用する',
+    en: 'Placement models {name}: the king-pair table is unusable ({msg}); the first two moves of Balance Shogi fall back to the value net',
+  },
+  msg_models_failed: {
+    ja: '布石の模型 {name}（{dir}）を読めない: {msg}',
+    en: 'Cannot load placement models {name} ({dir}): {msg}',
+  },
 
   // ---- 棋譜の欄 ----
   kifu_title: { ja: '棋譜', en: 'Record' },
@@ -311,6 +323,7 @@ const DICT = {
   ng_fuseki_label: { ja: '布石（40手）', en: 'Placement (40 moves)' },
   ng_placed_by_person: { ja: '人が置く', en: 'Placed by a person' },
   ng_builtin_policy: { ja: '内蔵の方策', en: 'Built-in policy' },
+  ng_builtin_models: { ja: '内蔵の方策（{name}）', en: 'Built-in policy ({name})' },
   ng_strength: { ja: '強さ', en: 'Strength' },
   ng_strength_title: {
     ja: '内蔵の方策の温度。1 は気まぐれ、5 は価値ネットで最善を選ぶ',
@@ -433,6 +446,10 @@ const DICT = {
   },
   bi_models_unreadable: { ja: 'モデルの一覧を読めない: {status} {url}', en: 'Cannot read the model list: {status} {url}' },
   bi_models_format: { ja: 'モデルの一覧の形式が違う: {format}', en: 'Wrong model-list format: {format}' },
+  bi_bad_filename: {
+    ja: 'モデルの一覧のファイル名が同じフォルダの中を指していない: {file}',
+    en: 'The model list names a file outside its own folder: {file}',
+  },
   bi_policy: { ja: '方策', en: 'the policy net' },
   bi_value: { ja: '価値ネット', en: 'the value net' },
   bi_missing_input: { ja: '{what}の ONNX に入力 {name} が無い', en: 'The ONNX for {what} has no input {name}' },
@@ -512,6 +529,25 @@ const DICT = {
   en_dup: { ja: '複製', en: 'Duplicate' },
   en_dup_suffix: { ja: '{name}（複製）', en: '{name} (copy)' },
   en_make_default_fuseki: { ja: '布石の既定にする', en: 'Make it the placement default' },
+  en_models_title: { ja: '布石の模型（世代）', en: 'Placement models (generations)' },
+  en_models_intro: {
+    ja: '同梱の模型のほかに、書き出した世代のフォルダ（models.json と 3 つの重み）を足せる。足した世代は席と検討の欄で選べるので、世代どうしを戦わせられる。',
+    en: 'Besides the bundled models you can add a folder holding an exported generation (models.json and the three weight files). Added generations can be picked per seat and per analysis pane, so generations can play each other.',
+  },
+  en_models_add: { ja: 'フォルダを足す…', en: 'Add a folder…' },
+  en_models_bundled: { ja: '同梱', en: 'Bundled' },
+  en_models_bundled_path: { ja: 'アプリに同梱', en: 'Shipped with the app' },
+  en_models_broken: { ja: '読めない', en: 'Unreadable' },
+  en_models_no_kings: { ja: '両玉の表なし', en: 'No king-pair table' },
+  en_models_pick: { ja: 'models.json のあるフォルダ', en: 'Folder holding models.json' },
+  en_models_loading: { ja: '布石の模型を読んでいる: {dir}', en: 'Loading placement models: {dir}' },
+  en_models_add_failed: { ja: '足せない: {msg}', en: 'Cannot add: {msg}' },
+  en_models_dup: { ja: 'そのフォルダはもう足してある', en: 'That folder is already added' },
+  en_models_failed: { ja: '模型を読めない', en: 'Cannot load the models' },
+  en_models_tauri_only: {
+    ja: 'フォルダの差し替えはアプリでだけ使える（ブラウザのプレビューでは同梱のみ）',
+    en: 'Swapping folders works only in the app (the browser preview has the bundled models only)',
+  },
   en_make_default_normal: { ja: '本将棋の既定にする', en: 'Make it the shogi default' },
   en_remove: { ja: '削除', en: 'Remove' },
   en_remove_confirm: { ja: '「{name}」を削除しますか', en: 'Remove “{name}”?' },

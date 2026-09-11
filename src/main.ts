@@ -6,7 +6,7 @@ import { Fuseki } from './rules/fuseki.ts';
 import { Game, rebuild, squareLabel, colorMark, overReasonText, type Mode, type ViewState, type Color } from './state/game.ts';
 import { lang, setLang, sideName, t, type Lang } from './i18n.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
-import { BUILTIN_ID, loadSettings, saveSettings, settingsLoadError, type Settings } from './settings.ts';
+import { BUILTIN_ID, isBuiltinId, loadSettings, newModelSetId, saveSettings, settingsLoadError, type Settings } from './settings.ts';
 import { Board, type Shape } from './ui/board.ts';
 import { TenbinGraph, type EvalPoint, type EvalSource } from './ui/graph.ts';
 import { Layout } from './ui/layout.ts';
@@ -16,12 +16,13 @@ import { KifuList } from './ui/kifu.ts';
 import { AnalysisPanel, type Target } from './ui/analysis.ts';
 import { KifuAnalyzer, askKifuAnalysis } from './ui/kifuanalysis.ts';
 import { UsiConsole } from './ui/console.ts';
-import { EngineDialog } from './ui/engines.ts';
+import { EngineDialog, type ModelSetView } from './ui/engines.ts';
 import { NewGameDialog, type NewGameChoice } from './ui/newgame.ts';
 import { PositionEditor } from './ui/editor.ts';
 import { MatchDriver } from './ui/play.ts';
 import { UsiEngine, isTauri, type Thinker } from './usi/engine.ts';
 import { BuiltinEvaluator } from './eval/builtin.ts';
+import { dirSource, urlSource } from './eval/source.ts';
 import { parseKif, writeKif, writeNormalOnlyKif } from './kif/tenbin-kif.ts';
 import type { Role as OpsRole } from 'shogiops/types';
 
@@ -34,16 +35,39 @@ interface Meta {
   startedAt: Date;
 }
 
-/** 内蔵の布石評価を読む。失敗しても対局は続く（布石の検討と AI の布石だけ使えない） */
-async function loadBuiltin(log: (text: string) => void): Promise<BuiltinEvaluator | null> {
+/**
+ * 模型一式（方策・両玉の価値表・価値ネット）を 1 つ載せた結果。
+ * 同梱は必ず 1 つ（id は 'builtin'）で、利用者が足したフォルダがそれに並ぶ。
+ */
+interface ModelEntry {
+  id: string;
+  name: string;
+  /** 差し替えのフォルダ。同梱なら null */
+  dir: string | null;
+  ev: BuiltinEvaluator | null;
+  /** 載せられなかった理由。載っていれば null */
+  error: string | null;
+}
+
+/** 模型一式を 1 つ読む。失敗しても対局は続く（その一式の布石だけ使えない） */
+async function loadModelSet(id: string, dir: string | null, name: string, log: (text: string) => void): Promise<ModelEntry> {
+  const base = new URL('/', location.href).href;
   try {
-    const base = new URL('/', location.href).href;
-    const b = await BuiltinEvaluator.load(base + 'models/', base + 'wasm/fuseki.mjs', base + 'vendor/ort/');
-    log(t('msg_builtin_loaded', { policy: b.manifest.policy.file, value: b.manifest.value.file, kings: b.kings ? t('msg_builtin_kings') : '' }));
-    return b;
+    const source = dir === null ? urlSource(base + 'models/') : dirSource(dir);
+    const b = await BuiltinEvaluator.load(source, base + 'wasm/fuseki.mjs', base + 'vendor/ort/', { id, name });
+    log(t(dir === null ? 'msg_builtin_loaded' : 'msg_models_loaded', {
+      name: b.config.name,
+      dir: dir ?? '',
+      policy: b.manifest.policy.file,
+      value: b.manifest.value.file,
+      kings: b.kings ? t('msg_builtin_kings') : '',
+    }));
+    if (!b.kings && b.kingsError) log(t('msg_models_no_kings', { name: b.config.name, msg: b.kingsError }));
+    return { id, name: b.config.name, dir, ev: b, error: null };
   } catch (e) {
-    log(t('msg_builtin_failed', { msg: e instanceof Error ? e.message : String(e) }));
-    return null;
+    const msg = e instanceof Error ? e.message : String(e);
+    log(dir === null ? t('msg_builtin_failed', { msg }) : t('msg_models_failed', { name, dir, msg }));
+    return { id, name, dir, ev: null, error: msg };
   }
 }
 
@@ -65,7 +89,8 @@ async function main(): Promise<void> {
 
   const fuseki = await Fuseki.load(new URL('/wasm/fuseki.mjs', location.href).href);
   let game = new Game(fuseki, 'tenbin');
-  let builtin: BuiltinEvaluator | null = null;
+  /** 載っている模型一式。同梱（BUILTIN_ID）と、設定に足したフォルダ */
+  const models = new Map<string, ModelEntry>();
   let meta: Meta = { sente: '', gote: '', timeControl: null, startedAt: new Date() };
   let clock = new Clock(null);
   /** 表示している局面。null は最新。数値は「何手目まで」 */
@@ -94,6 +119,11 @@ async function main(): Promise<void> {
     openLog: () => {
       consoleEl.hidden = false;
     },
+    models: {
+      list: () => [...models.values()].map(modelView),
+      add: (dir) => addModelSet(dir),
+      remove: (id) => removeModelSet(id),
+    },
   });
   const newGameDialog = new NewGameDialog($('dialogs'), () => settings);
   const setupDialog = new SetupDialog($('dialogs'), {
@@ -105,19 +135,27 @@ async function main(): Promise<void> {
     beforeInstall: () => updateDeps.beforeInstall(),
   });
 
-  /** 内蔵の布石評価の、利用者ごとの手（検討の欄・棋譜解析）。模型は 1 つを共有する */
+  /** 内蔵の布石評価の、利用者ごとの手（検討の欄・棋譜解析）。模型は一式ごとに共有する */
   const builtinViews = new Map<string, BuiltinEvaluator>();
 
-  /** id（'builtin' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
+  /** 布石の既定に選ばれている一式。エンジンが既定なら同梱に落とす（両玉の置き方に要る） */
+  function defaultBuiltin(): BuiltinEvaluator | null {
+    const chosen = isBuiltinId(settings.fusekiEngineId) ? models.get(settings.fusekiEngineId)?.ev ?? null : null;
+    return chosen ?? models.get(BUILTIN_ID)?.ev ?? null;
+  }
+
+  /** id（'builtin[:xxxx]' か登録 id）から思考するものを作る。processTag で同じ登録の 2 本目を区別する */
   function createThinker(id: string, processTag: string): Thinker | null {
-    if (id === BUILTIN_ID) {
-      if (!builtin) return null;
+    if (isBuiltinId(id)) {
+      const root = models.get(id)?.ev ?? null;
+      if (!root) return null;
       // 同じ実体を配ると、世代の数え札とルールを共有してしまい、片方の探索が
       // もう片方を黙って打ち消す（欄が空のまま止まる／解析から手が抜ける）
-      let v = builtinViews.get(processTag);
+      const key = `${id}#${processTag}`;
+      let v = builtinViews.get(key);
       if (!v) {
-        v = builtin.view();
-        builtinViews.set(processTag, v);
+        v = root.view();
+        builtinViews.set(key, v);
       }
       v.method = settings.builtinMethod;
       return v;
@@ -125,6 +163,46 @@ async function main(): Promise<void> {
     const cfg = settings.engines.find((e) => e.id === id);
     if (!cfg) return null;
     return new UsiEngine(cfg, `${cfg.id}-${processTag}`);
+  }
+
+  function modelView(m: ModelEntry): ModelSetView {
+    return {
+      id: m.id,
+      name: m.name,
+      dir: m.dir,
+      generation: m.ev?.manifest.generation ?? '',
+      kings: m.ev?.kings != null,
+      kingsError: m.ev?.kingsError ?? null,
+      error: m.error,
+    };
+  }
+
+  /**
+   * 模型一式（世代）を足す。載せてみて駄目なら設定に入れない（次の起動で必ず失敗する
+   * 登録を残さない）。戻りはエラー文で、成功なら null。
+   */
+  async function addModelSet(dir: string): Promise<string | null> {
+    if (settings.modelSets.some((m) => m.dir === dir)) return t('en_models_dup');
+    const id = newModelSetId();
+    const entry = await loadModelSet(id, dir, '', (text) => usiConsole.append('sys', text));
+    if (!entry.ev) return entry.error ?? t('en_models_failed');
+    models.set(id, entry);
+    settings.modelSets.push({ id, name: entry.name, dir });
+    await saveSettings(settings);
+    analysis.refreshEngineList();
+    return null;
+  }
+
+  /** 模型一式を外す。指していた席・検討の欄は既定へ戻す */
+  function removeModelSet(id: string): void {
+    models.delete(id);
+    for (const key of [...builtinViews.keys()]) if (key.startsWith(id + '#')) builtinViews.delete(key);
+    settings.modelSets = settings.modelSets.filter((m) => m.id !== id);
+    if (settings.fusekiEngineId === id) settings.fusekiEngineId = BUILTIN_ID;
+    // 検討の欄が指したままだと、設定に死んだ id が残る（エンジンを消すときと同じ後始末）
+    settings.analysisSlots = settings.analysisSlots.map((x) => (x === id ? 'auto' : x));
+    void saveSettings(settings);
+    analysis.refreshEngineList();
   }
 
   function setEval(ply: number, ev: { p: number; cp: number | null; approx: boolean }, source: EvalSource): void {
@@ -229,7 +307,7 @@ async function main(): Promise<void> {
     clock: () => clock,
     live: () => cursor === null && !editor,
     apply: (token) => tryApply(token),
-    builtin: () => builtin,
+    builtin: () => defaultBuiltin(),
     createThinker,
     say: (text, error) => say(text, error),
     onLog: (_name, dir, text) => usiConsole.append(dir, text),
@@ -1039,7 +1117,11 @@ async function main(): Promise<void> {
       paintAll();
     },
     game: () => game,
-    builtin: () => builtin,
+    builtin: () => defaultBuiltin(),
+    models: () => [...models.values()].map(modelView),
+    // 差し替え口の確認用。画面ではフォルダを選ばせるが、スクリプトからは道を直に渡す
+    addModels: (dir: string) => addModelSet(dir),
+    removeModels: (id: string) => removeModelSet(id),
     analysis,
     kifuAnalysis: (o: { fromIndex: number; secPerMove: number }) => kifuAnalyzer.run(o),
     evals: () => [...evals.values()],
@@ -1068,7 +1150,23 @@ async function main(): Promise<void> {
     },
   };
   void checkUpdate(true, updateDeps);
-  builtin = await loadBuiltin((t) => usiConsole.append('sys', t));
+  // 同梱を先に載せ、足した一式（世代）を順に載せる。1 つ失敗しても残りは載る
+  const logSys = (text: string) => usiConsole.append('sys', text);
+  models.set(BUILTIN_ID, await loadModelSet(BUILTIN_ID, null, t('bi_name'), logSys));
+  // 名前は**そのとき読んだ manifest の世代**が勝つ。同じフォルダへ新しい世代を書き出し直す
+  // のが本来の使い方なので、足したときの名前を持ち回ると席の札だけ古い世代のままになる。
+  // 覚えてある名前は、フォルダを読めなかったときの最後の呼び名としてだけ使う
+  let renamed = false;
+  for (const m of settings.modelSets) {
+    const entry = await loadModelSet(m.id, m.dir, '', logSys);
+    if (!entry.name) entry.name = m.name || m.dir;
+    models.set(m.id, entry);
+    if (entry.ev && entry.name !== m.name) {
+      m.name = entry.name;
+      renamed = true;
+    }
+  }
+  if (renamed) void saveSettings(settings);
   analysis.refreshEngineList();
   if (!isTauri()) {
     usiConsole.append('sys', t('msg_preview'));

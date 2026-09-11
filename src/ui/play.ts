@@ -11,7 +11,7 @@ import type { Clock } from '../state/clock.ts';
 import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
 import { BuiltinEvaluator } from '../eval/builtin.ts';
-import { BUILTIN_ID } from '../settings.ts';
+import { isBuiltinId } from '../settings.ts';
 import { t } from '../i18n.ts';
 import { HUMAN_ID, LEVELS, type NewGameChoice, type PlayerSpec } from './newgame.ts';
 
@@ -294,6 +294,18 @@ export class MatchDriver {
     };
   }
 
+  /** 席に割り当てた内蔵の一式（同梱か、足した世代）。載っていなければ null */
+  private builtinAt(seat: 0 | 1, id: string): BuiltinEvaluator | null {
+    const th = this.deps.createThinker(id, `play${seat}`);
+    if (!(th instanceof BuiltinEvaluator)) return null;
+    const key = `${seat}:${id}`;
+    if (!this.thinkers.has(key)) {
+      th.onLog = (dir, text) => this.deps.onLog(th.config.name, dir, text);
+      this.thinkers.set(key, th);
+    }
+    return th;
+  }
+
   private thinker(seat: 0 | 1, id: string): Thinker {
     const key = `${seat}:${id}`;
     let th = this.thinkers.get(key);
@@ -375,13 +387,17 @@ export class MatchDriver {
     const tokens = g.tokens().filter((t) => !t.startsWith('choose:'));
     const tenbin = g.mode === 'tenbin';
     const lv = LEVELS.find((l) => l.level === spec.level) ?? LEVELS[3]!;
-    const builtin = this.deps.builtin();
+    // 席が内蔵（同梱か、足した世代）ならその一式で考える。席ごとに別の世代を置けるので、
+    // 世代どうしを戦わせられる。外のエンジンの席でも両玉と先後の選択は表が要るので、
+    // そこだけ既定の一式に落とす（従来どおり）
+    const mine = isBuiltinId(spec.fusekiId) ? this.builtinAt(seat, spec.fusekiId) : null;
+    const builtin = mine ?? this.deps.builtin();
     if (phase === 'choose') {
       const kb = tokens[0]!.slice(2);
       const kw = tokens[1]!.slice(2);
       return `choose:${builtin ? builtin.choose(kb, kw) : 'sente'}`;
     }
-    if (spec.fusekiId === BUILTIN_ID || phase === 'kings') {
+    if (mine || phase === 'kings') {
       if (!builtin) throw new Error(t('pl_builtin_missing'));
       // 候補と勝率を対局の枠とグラフに出してから、温度で 1 手を選ぶ（選ぶ手は 1 位とは限らない）
       const onInfo = this.beginThinking(seat, color, builtin.config);
@@ -397,6 +413,7 @@ export class MatchDriver {
       }
       return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin });
     }
+    if (isBuiltinId(spec.fusekiId)) throw new Error(t('pl_builtin_missing'));
     const th = this.thinker(seat, spec.fusekiId);
     await this.ensureStarted(th);
     this.sendMultiPv(th);

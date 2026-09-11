@@ -16,8 +16,16 @@ import { BLACK, FEATURE_PLANES, Fuseki, type Drop, type FusekiColor } from '../r
 import type { EngineConfig, EngineState, LogDirection, Thinker } from '../usi/engine.ts';
 import type { Bestmove, UsiInfo } from '../usi/parse.ts';
 import type { EvalScale } from '../usi/evalscale.ts';
+import { urlSource, type ModelSource } from './source.ts';
 
 export type BuiltinMethod = 'value' | 'twoply';
+
+/** 模型一式の見分け。同梱は id='builtin'、差し替えは 'builtin:xxxx'（席と検討の欄がそのまま指せる） */
+export interface ModelIdent {
+  id: string;
+  /** 表示名。空なら manifest の generation を使う */
+  name?: string;
+}
 const CANDIDATES = 16;
 const TOTAL_PLIES = 40;
 /** 内蔵の擬似 cp の目盛り（41 手目の較正と同じ） */
@@ -98,7 +106,7 @@ export interface BuiltinResult {
 export class BuiltinEvaluator implements Thinker {
   readonly config: EngineConfig;
   state: EngineState = 'stopped';
-  idName = t('bi_name');
+  idName: string;
   onLog: ((dir: LogDirection, text: string) => void) | null = null;
   onStateChange: ((s: EngineState) => void) | null = null;
   method: BuiltinMethod = 'value';
@@ -110,53 +118,67 @@ export class BuiltinEvaluator implements Thinker {
     private readonly value: ort.InferenceSession,
     readonly kings: KingTable | null,
     readonly manifest: ModelManifest,
+    /** どの模型一式か（同梱か、差し替えのフォルダか）。席と検討の欄はこの id で指す */
+    readonly ident: ModelIdent & { name: string; dir: string | null },
     /** 盤も模型も 1 つしか無いので、重い計算はここに並べて順に走らせる（手の間で共有する） */
     private readonly shared: { chain: Promise<unknown> } = { chain: Promise.resolve() },
   ) {
-    this.config = { id: 'builtin', name: t('bi_name'), path: '', kind: 'fuseki', options: {}, eval: { ...BUILTIN_EVAL } };
+    this.config = { id: ident.id, name: ident.name, path: ident.dir ?? '', kind: 'fuseki', options: {}, eval: { ...BUILTIN_EVAL } };
+    this.idName = ident.name;
   }
 
   /**
-   * @param modelsUrl `/models/` のような、manifest と重みの置き場所
-   * @param wasmUrl cppshogi の wasm（`/wasm/fuseki.mjs`）
+   * @param source manifest と重みの読み口（同梱の URL か、差し替えのフォルダ）
+   * @param wasmUrl cppshogi の wasm（`/wasm/fuseki.mjs`）。ルールと特徴量は同梱ぶんを使う
    * @param ortDir onnxruntime-web の wasm の置き場所（`/vendor/ort/`）
+   * @param ident どの模型一式か。省略すると同梱として読む
    */
-  static async load(modelsUrl: string, wasmUrl: string, ortDir: string): Promise<BuiltinEvaluator> {
-    const base = modelsUrl.endsWith('/') ? modelsUrl : modelsUrl + '/';
-    const res = await fetch(base + 'models.json');
-    if (!res.ok) throw new Error(t('bi_models_unreadable', { status: res.status, url: `${base}models.json` }));
-    const manifest = (await res.json()) as ModelManifest;
+  static async load(source: ModelSource | string, wasmUrl: string, ortDir: string, ident: ModelIdent = { id: 'builtin' }): Promise<BuiltinEvaluator> {
+    const src = typeof source === 'string' ? urlSource(source) : source;
+    const manifest = JSON.parse(await src.text('models.json')) as ModelManifest;
     if (manifest.format !== 'tenbin-models/1') throw new Error(t('bi_models_format', { format: manifest.format }));
     ort.env.wasm.wasmPaths = { wasm: ortDir + 'ort-wasm-simd-threaded.wasm', mjs: ortDir + 'ort-wasm-simd-threaded.mjs' };
     ort.env.wasm.numThreads = 1;
     ort.env.logLevel = 'error';
     const fuseki = await Fuseki.load(wasmUrl);
-    const [policy, value] = await Promise.all([
-      ort.InferenceSession.create(base + manifest.policy.file, { executionProviders: ['wasm'] }),
-      ort.InferenceSession.create(base + manifest.value.file, { executionProviders: ['wasm'] }),
-    ]);
+    const opts: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'] };
+    const session = async (file: string): Promise<ort.InferenceSession> => {
+      const m = await src.model(file);
+      return typeof m === 'string' ? ort.InferenceSession.create(m, opts) : ort.InferenceSession.create(m, opts);
+    };
+    const [policy, value] = await Promise.all([session(manifest.policy.file), session(manifest.value.file)]);
     for (const [s, what] of [[policy, t('bi_policy')], [value, t('bi_value')]] as const) {
       for (const name of ['input1', 'input2']) if (!s.inputNames.includes(name)) throw new Error(t('bi_missing_input', { what, name }));
     }
     if (!policy.outputNames.includes('output_policy')) throw new Error(t('bi_missing_policy_out'));
     if (!value.outputNames.includes('output_value')) throw new Error(t('bi_missing_value_out'));
     let kings: KingTable | null = null;
+    let kingsError: string | null = null;
     try {
-      const kr = await fetch(base + manifest.kings.file);
-      if (kr.ok) kings = new KingTable((await kr.json()) as KingPairTable, manifest.policy.file);
+      kings = new KingTable(JSON.parse(await src.text(manifest.kings.file)) as KingPairTable, manifest.policy.file);
     } catch (e) {
+      // 表が無い・世代が違うなら天秤将棋の 1〜2 手目だけを閉じる（布石は動く）。
+      // 黙って閉じると理由が分からないので、載せた側が読めるように控えておく
+      kingsError = e instanceof Error ? e.message : String(e);
       console.warn(t('bi_table_unreadable'), e);
     }
-    return new BuiltinEvaluator(fuseki, policy, value, kings, manifest);
+    const name = ident.name || manifest.generation || t('bi_name');
+    const ev = new BuiltinEvaluator(fuseki, policy, value, kings, manifest, { id: ident.id, name, dir: src.dir });
+    ev.kingsError = kingsError;
+    return ev;
   }
+
+  /** 両玉の価値表を閉じた理由（読めた、または表が無いときは null） */
+  kingsError: string | null = null;
 
   /**
    * 同じ模型を使う別の手。検討の欄ごと・棋譜解析ごとに分けて持つと、世代の数え札と
    * ルール（Fuseki_Mode）が混ざらず、片方の探索がもう片方を黙って打ち消さない。
    */
   view(): BuiltinEvaluator {
-    const v = new BuiltinEvaluator(this.fuseki, this.policy, this.value, this.kings, this.manifest, this.shared);
+    const v = new BuiltinEvaluator(this.fuseki, this.policy, this.value, this.kings, this.manifest, this.ident, this.shared);
     v.method = this.method;
+    v.kingsError = this.kingsError;
     return v;
   }
 

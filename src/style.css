@@ -547,8 +547,14 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
 .dialog-head { display: flex; justify-content: space-between; align-items: baseline; }
 .dialog-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .hint { margin: 0; color: var(--ink-2); }
-.engine-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 50vh; overflow: auto; }
-.engine-item { padding: 10px 12px; border: 1px solid var(--rule); display: grid; gap: 2px; }
+.engine-list, .model-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 50vh; overflow: auto; }
+/* エンジンと模型の 2 つの一覧が縦に並ぶので、窓に収まらないぶんはダイアログごと送る */
+.engine-dialog .dialog-body { max-height: 86vh; overflow-y: auto; }
+.model-list { max-height: 30vh; }
+.engine-item, .model-item { padding: 10px 12px; border: 1px solid var(--rule); display: grid; gap: 2px; }
+/* 布石の模型（世代）の欄。エンジンの一覧と同じ見た目で、下に続ける */
+.models-head { margin: 4px 0 0; font-size: 14px; font-weight: 600; border-top: 1px solid var(--rule); padding-top: 12px; }
+.model-error { margin: 0; color: var(--sente); font-size: 12px; }
 .engine-name { font-weight: 600; }
 .engine-kind { font-weight: 400; font-size: 12px; color: var(--ink-3); margin-left: 6px; }
 .engine-path, .engine-meta { font-size: 12px; color: var(--ink-2); word-break: break-all; }

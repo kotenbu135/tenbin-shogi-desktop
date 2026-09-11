@@ -92,3 +92,29 @@ test('消えたエンジンを指す既定は捨てる', () => {
   assert.equal(s.normalEngineId, undefined);
   assert.equal(s.fusekiEngineId, 'builtin');
 });
+
+test('足した模型一式（世代）は id とフォルダで守り、既定に選べる', () => {
+  const s = merge({
+    modelSets: [
+      { id: 'builtin:a', name: 'iter2455', dir: '/m/iter2455' },
+      // フォルダの無いものは登録として意味が無い（次の起動で必ず失敗する）
+      { id: 'builtin:b', name: '壊れ' },
+      // id が重なるものは後から来たほうを落とす（席の指す先が二重になる）
+      { id: 'builtin:a', name: '同じ id', dir: '/m/other' },
+      // 'builtin' そのものは同梱の席なので奪わせない
+      { id: 'builtin', name: '同梱を装う', dir: '/m/fake' },
+    ] as never,
+    fusekiEngineId: 'builtin:a',
+  });
+  // 残すのは実在するフォルダぶん。id が壊れていても付け直して残す（登録は消さない）
+  assert.deepEqual(s.modelSets.map((m) => m.dir), ['/m/iter2455', '/m/other', '/m/fake']);
+  assert.equal(s.modelSets[0]!.id, 'builtin:a');
+  assert.equal(new Set(s.modelSets.map((m) => m.id)).size, 3, 'id は重ならない');
+  for (const m of s.modelSets) assert.match(m.id, /^builtin:/);
+  assert.equal(s.fusekiEngineId, 'builtin:a', '足した世代は布石の既定に選べる');
+});
+
+test('消えた模型一式を指す既定は同梱へ戻す', () => {
+  const s = merge({ modelSets: [], fusekiEngineId: 'builtin:gone' });
+  assert.equal(s.fusekiEngineId, 'builtin');
+});

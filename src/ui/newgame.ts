@@ -18,7 +18,7 @@ export type PlayerSpec =
       type: 'engine';
       /** 41 手目以降の USI エンジン id（無ければ '' で、本将棋は人が指す） */
       normalId: string;
-      /** 布石に使うもの。'builtin' か布石対応のエンジン id */
+      /** 布石に使うもの。'builtin'・足した模型一式 'builtin:xxxx'・布石対応のエンジン id */
       fusekiId: string;
       /** 1〜5。内蔵の方策の温度と探索 */
       level: number;
@@ -89,7 +89,9 @@ export class NewGameDialog {
         p.type === 'engine'
           ? p
           : { normalId: this.chosePerson[i] ? '' : defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
-      const fusekiIds = [HUMAN_ID, BUILTIN_ID, ...fusekis.map((e) => e.id)];
+      // 布石は「人が置く」「同梱の模型」「足した模型一式（世代）」「布石対応のエンジン」から選ぶ。
+      // 席ごとに別の世代を置けるので、世代どうしを戦わせられる
+      const fusekiIds = [HUMAN_ID, BUILTIN_ID, ...s.modelSets.map((m) => m.id), ...fusekis.map((e) => e.id)];
       const eng = {
         ...base,
         normalId:
@@ -113,6 +115,7 @@ export class NewGameDialog {
             <label class="fuseki-only">${t('ng_fuseki_label')}<select name="fuseki${i}">
               <option value="${HUMAN_ID}" ${eng.fusekiId === HUMAN_ID ? 'selected' : ''}>${t('ng_placed_by_person')}</option>
               <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>${t('ng_builtin_policy')}</option>
+              ${s.modelSets.map((m) => `<option value="${m.id}" ${eng.fusekiId === m.id ? 'selected' : ''}>${esc(t('ng_builtin_models', { name: m.name }))}</option>`).join('')}
               ${fusekis.map((e) => `<option value="${e.id}" ${eng.fusekiId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
             <div class="form-row two">

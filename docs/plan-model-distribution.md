@@ -247,3 +247,153 @@ SHA-256 も一度書けば済む。
   <https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html>, <https://github.com/tauri-apps/tauri/issues/6381>
 - 公開サイトの配布方針: `fuseki-shogi-web/models/README.md`, `THIRD_PARTY.md`, `build.mjs`
 - 開発リポジトリ: `THIRD_PARTY.md`（GCT の調査と水匠5の判断）, `docs/degct_plan.md`, `docs/setup.md`（`nn.bin` の取り出し）
+
+## 8. 最新の昇格世代を GUI に載せる（検討、2026-09-11）
+
+いま同梱しているのは iter1177 の 3 ファイルで、公開サイト `fuseki-shogi-web/models/` と
+**SHA-256 が一致している**（`5bf176c6…` / `e9275eca…` / `73263d1f…`。manifest の `same_as` は正しい）。
+学習は `kings_first/loop` で iter2522 を回しており、**最後に昇格したのは iter2455**
+（`.npz` 2026-09-10 20:09、対の表 `king_pairs_iter2455.json` 20:36）。
+
+用途が 2 つあり、機構も費用も別なので分けて書く。
+
+| | 何をする | 費用 | いつ |
+|---|---|---|---|
+| **(1) 開発機で最新世代を試す** | §3 案 B の**差し替え口**（設定「モデルのフォルダ」）。書き出した先を指すだけ | 実装のみ。対局は要らない | すぐ作れる |
+| **(2) 配布物として配る** | 書き出し → manifest 再生成 → 版上げ → 既存の updater が運ぶ | 直接測定 1,600 局 ＋ 帯の測り直し（8.4） | §6 のとおり 9/27〜30 の畳む期間に 1 回 |
+
+(1) は §3 の表で「差し替え口として設定に『モデルのフォルダ』を残す」と決めてあるものの実装で、
+§4 の最終行がそのまま仕様になる。**案 C（実行時ダウンロード）の不採用は変えない。**
+
+### 8.1 なぜ「最新」でなく「最新の**昇格**世代」なのか
+
+`KingTable` の作りが、方策のファイル名の `iterN` と表の `model` の `iterN` を突き合わせる
+（`src/eval/builtin.ts` の 47〜52 行）。ずれると天秤将棋の 1〜2 手目だけ閉じる。
+そして表を作り直すのは `rollout_loop_gated.py` の `refresh_table` で、**昇格したときにしか走らない**。
+だから対になる表があるのは昇格世代だけである。iter2455 は表がもうあるので 884 秒の作り直しは要らない。
+学習中の最新（iter2522）を載せると表が無く、天秤モードが閉じたアプリになる。
+
+価値ネット `value_mid_iter1400_t40.onnx` は世代に従属しない（照合もしていない）ので、この話の外。
+iter1400〜2455 のゲート実対局が新たに 3 万局以上たまっているので学習し直す価値はあるが、**別の判断**として立てる。
+
+### 8.2 差し替え口の実装（§4 の「差し替え口」行の具体化）
+
+**2026-09-11 に実装した（未リリース）。同梱の模型は動かしていない**——配布物の差し替えは
+8.4 の費用を払ってから 9/30 の凍結直後に 1 回だけ行う。ここで作ったのは仕組みだけである。
+
+| 触る所 | 中身 |
+|---|---|
+| `src-tauri/src/lib.rs`（87 行 `read_text_file` の隣） | `read_binary_file(path)` を足す。**返しは `tauri::ipc::Response::new(bytes)`**（Tauri 2 の生バイト応答）。`Vec<u8>` をそのまま返すと IPC が JSON の数値配列に直すので、2MB の ONNX が数十 MB になり読み込みが数秒かかる。遅いのを模型のせいだと読み違える |
+| `src/eval/builtin.ts`（124 行 `load()`） | いまは `fetch(base + 'models.json')` と URL 文字列で `ort` を呼ぶ一本道。ここを「URL で読む／バイト列で読む」の 2 通りに分ける。`ort.InferenceSession.create` は `Uint8Array` を受けるので、**`convertFileSrc` + `fetch` は使わない**（使うと `tauri.conf.json` の `connect-src` を開けることになる。CSP は触らない） |
+| `src/settings.ts` | `modelsDir?: string`（未設定＝同梱）を足す |
+| `src/main.ts`（41 行 `loadBuiltin`） | `modelsDir` があればバイト列で読む。**manifest の形式が合わなければ既定に戻す**（§4 の決めごとをそのまま） |
+| `src/i18n.ts` | 設定の文言と、差し替え中である旨の起動ログ |
+| `src-tauri/capabilities/default.json` | **変更なし**（`dialog:default` / `store:default` はもう与えてある） |
+
+起動ログ（`msg_builtin_loaded`）は世代を出しているので、差し替え中はそれと分かる語を添える。
+同梱と外部を取り違えたまま測ると、そのまま誤った比較になる。
+
+**世代どうしを戦わせる。** 足した一式は同梱と同じ id の空間（`builtin` / `builtin:xxxx`）に置くので、
+対局の席の「布石を指すもの」と検討の欄がそのまま指せる。席ごとに別の世代を割り当てられ、
+`play.ts` は席の一式で `goInfinite` / `pickMove` / `choose` を回す（外のエンジンの席のときだけ、
+両玉と先後の選択が既定の一式に落ちる。表が要るため）。**強さの判定はここではやらない**——
+1 局や数局で分かる差ではなく、判定は 8.4(a) の直接測定でする。
+
+開発機で iter2455 を試す手順（`/tmp/models-iter2455/` を指す）:
+
+```bash
+mkdir -p /tmp/models-iter2455
+.venv/bin/python scripts/export_fuseki_net_to_onnx.py \
+  training_runs/kings_first/loop/iter2455.npz \
+  /tmp/models-iter2455/fuseki_degct_b3_iter2455.onnx --network fuseki6x64 --gpu -1
+cp training_runs/kings_first/loop/king_pairs_iter2455.json /tmp/models-iter2455/
+cp /home/sakis/tenbin-shogi-desktop/public/models/value_mid_iter1400_t40.onnx /tmp/models-iter2455/
+```
+
+`models.json` は 3 ファイルの名前と SHA-256 を書けばよい（`generation` は `iter2455`）。
+**`kings.file` は写した実物の名前**（ここでは `king_pairs_iter2455.json`。同梱版の `_games` は付かない）に
+すること。名前が食い違うと `load()` の `catch` が握って `kings` が黙って `null` になり、
+天秤モードだけが理由の分からないまま閉じる。世代の照合は表の中の `model`（`iter2455.npz`）と
+方策のファイル名で行うので、`_games` の有無は自由。
+**この表はロールアウト採点の表**である（8.4）。試すぶんには足りるが、配る表ではない。
+
+### 8.3 配る側は 1 本の道にまとめる
+
+開発リポジトリの `scripts/publish_fuseki_net.sh` が公開サイト側の差し替えを全部やっている
+（書き出し・8 箇所の名前・`.gitignore` の許可リスト・表の対応・ビルドと検証）。
+**デスクトップ用に 2 本目の書き出しを作らない。** あの script に宛先をもう 1 つ足し、
+`public/models/` にも同じファイルを置く形にする。2 本にすると必ず片方が古くなる。
+
+デスクトップ側だけの決まりごと:
+
+- **manifest は複製でなく再生成。** `models.json` は公開サイトが持たない項目
+  （`outputs` / `heldout` / `auc` / `license` / `origin` / `same_as`）と、ファイルごとの SHA-256 を持つ。
+- **`origin` と `same_as` は事実の申告**（GPL の由来の説明）。サイトに無い重みを載せた瞬間に嘘になるので、
+  同じコミットで書き換えるか、外す。
+- **古いファイルを消す。** Vite は `public/` を丸ごと写すので、置いたままの旧 `.onnx` はそのまま同梱される。
+  `dist/models/` にも旧世代が残っている。公開側の script と同じく `rm -f` して、
+  ビルド後に新しい名前が `dist/models/` に入っていることを確かめる。
+- 版を上げて（`npm run bump`）リリースする。運ぶのは既存の updater。
+
+### 8.4 配る前に払う費用 2 つ
+
+**(a) 直接測定 1,600 局。** iter1177 → iter2455 は昇格ゲートの鎖で、
+`docs/gate-winners-curse.md`（開発リポジトリ）のとおり鎖の合計は真の差の約 2.1 倍に出る。
+**差し替えの根拠にできるのは直接対局だけ**である。学習と並走できる（800 局が 885 秒なので 1,600 局で約 30 分）。
+
+```bash
+cd /home/sakis/fuseki-shogi-ai && .venv/bin/python scripts/fuseki_placement_arena.py \
+  --candidate training_runs/kings_first/loop/iter2455.npz \
+  --anchor training_runs/kings_first/loop/iter1177.npz \
+  --network fuseki6x64 --anchor-network fuseki6x64 --play-engine yaneuraou \
+  --games 1600 --jobs 8 --yaneuraou-nodes 200000 --yaneuraou-resign-cp 2500 \
+  --gpu -1 --seed 11772455 --prefix kings \
+  --king-table training_runs/kings_first/loop/king_pairs_iter2455.json --king-explore 0.2 \
+  --out-json /tmp/h2h_1177_vs_2455.json
+```
+
+先後を同数ずつ入れ替え、**両者とも同じ 1 つの表から接頭辞を引く**ので、測っているのは方策の差だけで
+表の差は入らない（ゲートの流儀と同じ。ここでは候補側の表を使う）。
+
+**(b) 帯の測り直し。** ここが見落としやすい。いま配っている `king_pairs_iter1177_games.json` は
+`build_measured_table.py` で作った**帯 48 組の V を実対局の勝敗に置き換えた表**で、
+`band_v_source` にそう書いてある（採点は cp_scale 435 / offset 34、温度 0.4）。
+学習ループが昇格のたびに作る `loop/king_pairs_iterN.json` は**ロールアウト採点のまま**
+（cp_scale 600 / offset 0、温度 1.0）で、帯の中では「どちらの組が良いか」を当てられない
+（開発リポジトリ `docs/king-table-calibration.md` 6 節）。なお表の `v` は勝率なので、
+アプリは表の中の cp の目盛りを読まない。`BUILTIN_EVAL`（`src/eval/builtin.ts` 35 行の 435 / +34）を
+測り直す話ではない。GUI の「置く役の候補」と「選ぶ役」は
+まさに帯の中で使う規則なので、ロールアウトの表をそのまま配ると**そこだけ質が落ちる**。
+
+測り直しは 2 段（ふるい 120 組 × 250 局 ＝ 30,000 局、本測定 48 組 × 500 局 ＝ 24,000 局）で
+合計 54,000 局。実測の 400 局 = 528 秒（`--jobs 8`）から**約 20 時間**、学習を止めて `--jobs 24` に
+振れば数時間の見込み（`--jobs 24` は未実測）。**9/30 の学習凍結の直後に置くのが素直で、§6 の
+「最終版は畳む期間に 1 回だけ作る」とも一致する。**
+
+### 8.5 段取り
+
+1. ~~差し替え口を実装する（8.2）~~ **済（2026-09-11）。** CPU を使わないので学習と並走で書いた。
+2. ~~iter2455 を書き出し、差し替え口で GUI に載せて触る~~ **済。** 下の確認のとおり。
+3. 直接測定 1,600 局（8.4a）。学習と並走で 30 分。差が測れなければ配る理由が無い。**未**
+4. 9/30 の凍結後に、最終世代で帯を測り直し（8.4b）、`publish_fuseki_net.sh` の一本道で
+   サイトとデスクトップの両方を差し替え、manifest を再生成して版を上げる。**未**
+
+### 8.6 実機での確認（2026-09-11、`npm run tauri dev` に繋いで）
+
+| 見たこと | 結果 |
+|---|---|
+| 書き出した iter2455 のフォルダを足す | 載る（`generation: iter2455`、両玉の表も対で載る） |
+| 次の起動で設定から読み直す | 載る（同梱 → 足した一式の順に読む。1 つ失敗しても残りは載る） |
+| 席ごとに別の世代（先手＝同梱 iter1177 / 後手＝iter2455） | 14 手まで進み、対局の枠に「内蔵の布石評価」と「iter2455」が並ぶ。console のエラー無し |
+| 世代の食い違う表（方策 iter2455 ＋ 表 iter1177） | 一式は載り、**両玉の表だけ閉じる**。一覧に「両玉の表なし」と食い違った世代名が出る |
+| 同じフォルダへ別の世代（iter2424）を書き出し直して読み直す | 札が iter2424 に変わる。**名前は覚えたものでなく、そのとき読んだ manifest の世代が勝つ**（同じフォルダを更新していく使い方が本筋なので、古い札のまま比べる事故を作らない） |
+| 登録の画面（「布石の模型（世代）」の欄） | 同梱と足した一式が並ぶ。同梱は外せない。ダイアログは 86vh で頭打ちにして中を送る（一覧が 2 つ縦に並ぶので、そのままだと窓からはみ出した） |
+| 外す | 一覧から消え、既定は同梱へ、検討の欄は「自動」へ戻る |
+
+**GUI の対局とアリーナは別の量を測っている。** GUI では席がそれぞれ**自分の一式の表**から
+両玉と先後の選択を引くので、iter1177 対 iter2455 は「方策＋表」対「方策＋表」である。
+8.4(a) のアリーナは表を 1 つに固定して方策だけを取り出す。**数字を並べて比べない。**
+GUI で見るのは指し手の中身で、強弱の判定はアリーナでする。
+
+同梱だけの経路（`npm run preview` + `scripts/smoke-builtin.mjs`）も iter1177 のまま通る。
+確認に使った `/tmp` の登録は最後に外してある（消えるフォルダを設定に残さない）。

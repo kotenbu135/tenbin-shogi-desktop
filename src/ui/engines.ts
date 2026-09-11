@@ -20,6 +20,27 @@ const OPTION_LABELS: Record<string, Key> = {
   DNN_Batch_Size: 'en_opt_batch',
 };
 
+/** 布石の模型一式（世代）の、画面に出すぶん */
+export interface ModelSetView {
+  id: string;
+  name: string;
+  /** 差し替えのフォルダ。同梱なら null */
+  dir: string | null;
+  generation: string;
+  /** 両玉の価値表が載ったか（載らなければ天秤将棋の 1〜2 手目だけ閉じる） */
+  kings: boolean;
+  kingsError: string | null;
+  /** 一式ごと載せられなかった理由 */
+  error: string | null;
+}
+
+export interface ModelSetApi {
+  list(): ModelSetView[];
+  /** フォルダを足す。戻りはエラー文で、成功なら null */
+  add(dir: string): Promise<string | null>;
+  remove(id: string): void;
+}
+
 export interface EngineDialogDeps {
   settings(): Settings;
   save(): Promise<void>;
@@ -27,6 +48,8 @@ export interface EngineDialogDeps {
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
   /** USI の生ログを出す（エンジンが起動しないときの手がかり） */
   openLog(): void;
+  /** 布石の模型一式（世代）の付け外し */
+  models: ModelSetApi;
 }
 
 interface FoundExecutable {
@@ -83,6 +106,13 @@ export class EngineDialog {
           <button type="button" data-act="log" title="${t('en_log_title')}">${t('en_log')}</button>
           <button type="button" data-act="import">${t('en_import')}</button>
           <button type="button" data-act="add" class="primary">${t('en_add')}</button>
+        </div>
+        <h3 class="models-head">${t('en_models_title')}</h3>
+        <p class="hint">${t('en_models_intro')}</p>
+        <ul class="model-list"></ul>
+        <p class="model-error" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" data-act="add-models">${t('en_models_add')}</button>
         </div>
       </form>`;
     const ul = d.querySelector('.engine-list')!;
@@ -141,6 +171,7 @@ export class EngineDialog {
       });
       ul.appendChild(li);
     }
+    this.paintModels();
     d.querySelector('[data-act="log"]')!.addEventListener('click', () => {
       this.dialog.close();
       this.deps.openLog();
@@ -150,6 +181,70 @@ export class EngineDialog {
     d.querySelector('[data-act="open-dir"]')!.addEventListener('click', () => {
       if (this.enginesDir) void invoke('open_path', { path: this.enginesDir }).catch(() => undefined);
     });
+  }
+
+  /** 布石の模型一式（世代）の一覧。同梱は外せない。足したフォルダは既定にもできる */
+  private paintModels(): void {
+    const s = this.deps.settings();
+    const ul = this.dialog.querySelector('.model-list');
+    if (!ul) return;
+    ul.replaceChildren();
+    for (const m of this.deps.models.list()) {
+      const li = document.createElement('li');
+      li.className = 'model-item';
+      const badges: string[] = [];
+      if (m.dir === null) badges.push(`<span class="engine-kind">${t('en_models_bundled')}</span>`);
+      if (s.fusekiEngineId === m.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
+      if (m.error) badges.push(`<span class="engine-gpu">${t('en_models_broken')}</span>`);
+      else if (!m.kings) badges.push(`<span class="engine-gpu">${t('en_models_no_kings')}</span>`);
+      const detail = m.error ?? m.kingsError ?? '';
+      // 名前が世代そのものなら二度書かない（同梱は「内蔵の布石評価」なので世代を添える）
+      const gen = m.generation && m.generation !== m.name ? m.generation : '';
+      li.innerHTML = `
+        <div class="engine-name">${esc(m.name || m.generation || t('en_noname'))} ${badges.join(' ')}</div>
+        <div class="engine-path">${esc(m.dir ?? t('en_models_bundled_path'))}</div>
+        ${gen || detail ? `<div class="engine-meta">${esc(gen)}${detail ? `${gen ? ' · ' : ''}${esc(detail)}` : ''}</div>` : ''}
+        <div class="engine-actions">
+          <button type="button" data-act="model-default" ${s.fusekiEngineId === m.id || m.error ? 'disabled' : ''}>${t('en_make_default_fuseki')}</button>
+          ${m.dir === null ? '' : `<button type="button" data-act="model-remove" class="danger">${t('en_remove')}</button>`}
+        </div>`;
+      li.querySelector('[data-act="model-default"]')!.addEventListener('click', () => {
+        s.fusekiEngineId = m.id;
+        void this.persist();
+      });
+      li.querySelector('[data-act="model-remove"]')?.addEventListener('click', () => {
+        if (!confirm(t('en_remove_confirm', { name: m.name || m.dir || '' }))) return;
+        this.deps.models.remove(m.id);
+        this.paintList();
+      });
+      ul.appendChild(li);
+    }
+    this.dialog.querySelector('[data-act="add-models"]')!.addEventListener('click', () => void this.addModels());
+  }
+
+  /** models.json のあるフォルダを足す。載せてみて駄目ならその場で理由を出す */
+  private async addModels(): Promise<void> {
+    const err = this.dialog.querySelector<HTMLElement>('.model-error');
+    if (!isTauri()) {
+      if (err) {
+        err.textContent = t('en_models_tauri_only');
+        err.hidden = false;
+      }
+      return;
+    }
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const dir = await open({ multiple: false, directory: true, title: t('en_models_pick') });
+    if (typeof dir !== 'string') return;
+    this.busy(t('en_models_loading', { dir }));
+    const msg = await this.deps.models.add(dir);
+    this.paintList();
+    if (msg) {
+      const el = this.dialog.querySelector<HTMLElement>('.model-error');
+      if (el) {
+        el.textContent = t('en_models_add_failed', { msg });
+        el.hidden = false;
+      }
+    }
   }
 
   private async persist(): Promise<void> {

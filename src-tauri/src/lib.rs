@@ -97,6 +97,17 @@ fn read_text_file(path: String) -> Result<String, String> {
     Ok(s.into_owned())
 }
 
+/// 模型（ONNX と価値表）をバイト列で読む。差し替え口（設定の「布石の模型」）で使う。
+///
+/// 返しを `Vec<u8>` にしないのは、IPC が JSON の数値配列に直してしまい、2MB の ONNX が
+/// 数十 MB の文字列になって読み込みが数秒かかるため。`Response` なら生のまま
+/// ArrayBuffer で届く（同梱の模型は URL のまま `fetch` で読むのでこの道を通らない）。
+#[tauri::command]
+fn read_binary_file(path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("読めない: {path} ({e})"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// UTF-8 で書く。
 #[tauri::command]
 fn write_text_file(path: String, text: String) -> Result<(), String> {
@@ -544,6 +555,7 @@ pub fn run() {
             path_is_file,
             path_is_dir,
             read_text_file,
+            read_binary_file,
             write_text_file,
             engines_dir,
             data_dir,

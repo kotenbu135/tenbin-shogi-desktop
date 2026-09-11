@@ -9,6 +9,33 @@ import type { UsiOption } from './usi/parse.ts';
 /** 内蔵の布石評価を指す id。エンジンの一覧には出さず、布石の側の既定として使う */
 export const BUILTIN_ID = 'builtin';
 
+/** 差し替えた模型一式の id の頭。'builtin:xxxx' の形で、同梱と同じ空間に置く */
+export const BUILTIN_PREFIX = 'builtin:';
+
+/** 同梱・差し替えを問わず、内蔵の布石評価（の、どれか 1 つ）を指す id か */
+export function isBuiltinId(id: string | undefined | null): boolean {
+  return id === BUILTIN_ID || (typeof id === 'string' && id.startsWith(BUILTIN_PREFIX));
+}
+
+/**
+ * 差し替えの模型一式（方策・両玉の価値表・価値ネットと `models.json` の 4 点が入ったフォルダ）。
+ *
+ * 学習で昇格した世代を書き出して足すと、同梱と並べて席や検討の欄に置ける
+ * （＝世代どうしを戦わせられる）。配布物の同梱は動かさない。
+ */
+export interface ModelSetConfig {
+  /** 'builtin:xxxx' */
+  id: string;
+  /** 表示名。既定は manifest の generation（iter2455 など） */
+  name: string;
+  /** models.json のあるフォルダ */
+  dir: string;
+}
+
+export function newModelSetId(): string {
+  return BUILTIN_PREFIX + Math.random().toString(36).slice(2, 10);
+}
+
 export interface Settings {
   engines: EngineConfig[];
   theme: 'system' | 'light' | 'dark';
@@ -26,6 +53,8 @@ export interface Settings {
   analysisSlots: string[];
   /** 内蔵の布石評価の方式 */
   builtinMethod: 'value' | 'twoply';
+  /** 足した模型一式（世代）。同梱は一覧に出すだけで、ここには入らない */
+  modelSets: ModelSetConfig[];
   /** 棋譜解析の 1 局面の秒数 */
   kifuAnalysisSec: number;
   /** 画面の割りつけ（仕切りの位置と、下の欄で開いているタブ） */
@@ -81,6 +110,7 @@ export function defaultSettings(): Settings {
     playMultiPv: 3,
     analysisSlots: ['auto'],
     builtinMethod: 'value',
+    modelSets: [],
     kifuAnalysisSec: 2,
     layout: { ...DEFAULT_LAYOUT },
     seenSetup: false,
@@ -157,13 +187,38 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     playMultiPv: typeof saved.playMultiPv === 'number' && saved.playMultiPv >= 1 ? Math.min(10, Math.round(saved.playMultiPv)) : d.playMultiPv,
     analysisSlots: Array.isArray(saved.analysisSlots) && saved.analysisSlots.length ? saved.analysisSlots : d.analysisSlots,
     builtinMethod: saved.builtinMethod === 'twoply' ? 'twoply' : 'value',
+    modelSets: mergeModelSets(saved.modelSets),
     kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,
     layout: mergeLayout(saved.layout),
     seenSetup: saved.seenSetup === true,
   };
   if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
-  if (s.fusekiEngineId !== BUILTIN_ID && !engines.some((e) => e.id === s.fusekiEngineId)) s.fusekiEngineId = BUILTIN_ID;
+  // 既定は同梱・足した模型一式・布石対応のエンジンのどれか。消えた先を指したままにしない
+  if (s.fusekiEngineId !== BUILTIN_ID
+      && !s.modelSets.some((m) => m.id === s.fusekiEngineId)
+      && !engines.some((e) => e.id === s.fusekiEngineId)) {
+    s.fusekiEngineId = BUILTIN_ID;
+  }
   return s;
+}
+
+/**
+ * 保存された模型一式を読む。
+ *
+ * 捨てるのは「使えない登録」だけにする——フォルダの無いものと、同じフォルダの二重登録。
+ * id が壊れている・重なっているのは付け直せば済む（フォルダは実在するので、
+ * 帳簿の都合で利用者の登録を消さない）。
+ */
+function mergeModelSets(raw: unknown): ModelSetConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ModelSetConfig[] = [];
+  for (const r of raw as Partial<ModelSetConfig>[]) {
+    if (!r || typeof r.dir !== 'string' || !r.dir) continue;
+    if (out.some((m) => m.dir === r.dir)) continue;
+    const keep = typeof r.id === 'string' && r.id.startsWith(BUILTIN_PREFIX) && !out.some((m) => m.id === r.id);
+    out.push({ id: keep ? r.id! : newModelSetId(), name: typeof r.name === 'string' && r.name ? r.name : r.dir, dir: r.dir });
+  }
+  return out;
 }
 
 /** 既定の並びを複製する（設定を書き換えても定数が壊れないように） */
