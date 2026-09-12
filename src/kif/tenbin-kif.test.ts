@@ -114,6 +114,10 @@ test('tenbinshogi.com が実際に出した棋譜（見本）を玉の配置か�
   assert.equal(r.tokens.filter((t) => t.includes('*')).length, 40);
   assert.equal(r.tokens[41], '1i1h');
   assert.equal(r.tokens[47], 'resign');
+  // 消費時間はトークンと 1 対 1（rebuild が同じ番号で引くので、選択の枠でずれると全部ずれる）
+  assert.equal(r.times.length, r.tokens.length);
+  assert.equal(r.times[40], undefined);
+  assert.deepEqual(r.times[41], { elapsed: 0, total: 0 });
   assert.equal(r.sente, 'あなた');
   assert.equal(r.gote, '天秤 AI 3');
 });
