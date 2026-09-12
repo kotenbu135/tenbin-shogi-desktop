@@ -1,7 +1,7 @@
 {
   "name": "tenbin-shogi-gui",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "license": "GPL-3.0-only",
   "description": "天秤将棋のデスクトップGUI（Tauri）。布石の段階から評価値を出し、PCのエンジンで検討する。",
