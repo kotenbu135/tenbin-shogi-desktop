@@ -4,6 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { parseKif, fusekiDropKif } from './tenbin-kif.ts';
 
 const HEAD = '手数----指手---------消費時間--';
@@ -57,4 +58,62 @@ test('駒打ちの USI と KIF 表記の往復', () => {
     assert.equal(fusekiDropKif(usi), text);
     assert.deepEqual(parseKif(kif(`   1 ${text}`)).tokens, [usi]);
   }
+});
+
+test('tenbinshogi.com の形: 布石はヘッダタグ、本文は本将棋の手', () => {
+  const r = parseKif(
+    [
+      '# 天秤将棋 tenbinshogi.com',
+      '先手：あなた',
+      '後手：天秤 AI 3',
+      '天秤布石：K*5i K*5a P*7g P*3c',
+      '天秤選択：sente',
+      '先手番',
+      HEAD,
+      '   1 ７六歩(77)   ( 0:04/00:00:04)',
+      '   2 ３四歩(33)',
+      '   3 投了',
+    ].join('\n'),
+  );
+  assert.equal(r.mode, 'tenbin');
+  assert.equal(r.startSfen, undefined);
+  assert.deepEqual(r.tokens, ['K*5i', 'K*5a', 'choose:sente', 'P*7g', 'P*3c', '7g7f', '3c3d', 'resign']);
+  // 布石の手には消費時間が無い。本将棋の 1 手目の時間が 1 手目の位置にずれ込まないこと
+  assert.equal(r.times[4], undefined);
+  assert.deepEqual(r.times[5], { elapsed: 4, total: 4 });
+  assert.equal(r.sente, 'あなた');
+});
+
+test('選択のタグが無ければ choose を入れない（布石の途中で終わった対局）', () => {
+  const r = parseKif(['天秤布石：K*5i', HEAD].join('\n'));
+  assert.equal(r.mode, 'tenbin');
+  assert.deepEqual(r.tokens, ['K*5i']);
+});
+
+test('壊れた天秤布石のタグは落とす', () => {
+  assert.throws(() => parseKif(['天秤布石：５九玉打', HEAD].join('\n')), /天秤布石/);
+});
+
+test('KIF でない文字は黙って平手にしない', () => {
+  // 旧「手順をコピー」の USI 一行。これを平手 0 手として読んでいたのが不具合の元
+  assert.throws(() => parseKif('K*5i K*5a choose:sente P*7g 7g7f'), /KIF として読めない/);
+  assert.throws(() => parseKif('牛乳とパンを買う'), /KIF として読めない/);
+});
+
+test('tenbinshogi.com が実際に出した棋譜（見本）を玉の配置から読む', () => {
+  // fixtures/tenbinshogi-com.kif はサイトの tenbinKif() が出した実物。サイト側が形を変えたら落ちる
+  const text = readFileSync(new URL('./fixtures/tenbinshogi-com.kif', import.meta.url), 'utf8');
+  const r = parseKif(text);
+  assert.equal(r.mode, 'tenbin');
+  assert.equal(r.startSfen, undefined);
+  assert.equal(r.tokens[0], 'K*5i');
+  assert.equal(r.tokens[1], 'K*5a');
+  assert.equal(r.tokens[2], 'choose:sente');
+  // 布石 40 手＋選択＋本将棋 6 手＋投了
+  assert.equal(r.tokens.length, 48);
+  assert.equal(r.tokens.filter((t) => t.includes('*')).length, 40);
+  assert.equal(r.tokens[41], '1i1h');
+  assert.equal(r.tokens[47], 'resign');
+  assert.equal(r.sente, 'あなた');
+  assert.equal(r.gote, '天秤 AI 3');
 });

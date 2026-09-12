@@ -1,5 +1,6 @@
 // ブラウザのプレビュー（npm run preview）で、時計・盤面反転・KIF の往復・局面編集・任意局面を通す煙テスト。
 //   node scripts/smoke-features.mjs <画像の出力先>
+import { readFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
 const OUT = process.argv[2] ?? '.';
@@ -82,6 +83,17 @@ const kif2 = await ev(() => window.tenbin.kif());
 const normalKif = await ev(() => window.tenbin.kif(true));
 console.log('本将棋だけの KIF 先頭:\n' + normalKif.split('\n').slice(0, 6).join('\n'));
 console.log('本将棋だけの KIF 末尾:', normalKif.split('\n').slice(-3).join(' / '));
+
+// 3.5 tenbinshogi.com の棋譜（布石はヘッダタグ、本文は 41 手目からの本将棋）を貼る
+const siteKif = readFileSync(new URL('../src/kif/fixtures/tenbinshogi-com.kif', import.meta.url), 'utf8');
+await ev((t) => window.tenbin.load(t), siteKif);
+console.log(
+  'サイトの棋譜:',
+  '手数', await ev(() => window.tenbin.game().moves.length),
+  '| 1 手目', await ev(() => window.tenbin.game().moves[0]?.usi),
+  '| 41 手目', await ev(() => window.tenbin.game().moves.find((m) => m.ply === 41)?.usi),
+  '| 状態:', await status(),
+);
 
 // 4. 局面編集
 await click('button[data-act="edit"]');

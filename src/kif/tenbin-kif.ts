@@ -6,6 +6,11 @@
 //
 // 将棋所や ShogiHome は空の盤に玉を持ち駒にした局面を読めないので、布石を含む棋譜は
 // このアプリの方言になる。本将棋だけを普通の KIF にしたいときは exportNormalOnly() を使う。
+//
+// もう 1 つ、tenbinshogi.com の「棋譜をコピー」が出す形も読む。あちらは 41 手目の局面を
+// 局面図に置いて本将棋の手を 1 手目から並べ（＝通常の将棋ソフトでも開ける）、布石 40 手と
+// 先後の選択をヘッダタグ「天秤布石」「天秤選択」に USI で持たせる。タグがあれば玉を置く
+// 1 手目から並べ直せるので、天秤モードとして読む。
 
 import { makeUsi, parseSquareName } from 'shogiops/util';
 import { makeKifHeader, makeKifMoveOrDrop, normalizedKifLines, parseKifHeader, parseKifMoveOrDrop, parseTags } from 'shogiops/notation/kif';
@@ -30,6 +35,9 @@ export interface ParsedKif {
   gote?: string;
   timeControl: TimeControl | null;
 }
+
+/** これがヘッダに 1 つも無ければ KIF ではないと見なす。'a:b' のような文字列も parseTags は拾うため */
+const KIF_TAGS = ['手合割', '先手', '後手', '上手', '下手', '開始日時', '終了日時', '棋戦', '場所', '持ち時間', '表題', '戦型', '先手の持駒', '後手の持駒'];
 
 const ZEN_DIGITS = '１２３４５６７８９';
 const KANJI_RANKS = '一二三四五六七八九';
@@ -160,14 +168,32 @@ function parseFusekiDrop(text: string): string | null {
   return `${KANJI_ROLE[m[3]!]}*${f}${String.fromCharCode(96 + r)}`;
 }
 
-/** KIF を読む。このアプリの方言と、普通の KIF（平手・局面図つき）の両方。 */
+/**
+ * tenbinshogi.com が付けるヘッダタグ「天秤布石」「天秤選択」。KIF を正規化する前の生の文字から
+ * 読む（正規化に落とされたり全角化されたりしても拾えるように、区切りは全角・半角の両方を見る）。
+ */
+function parseTenbinTags(text: string): { fuseki: string[]; chosen: 'sente' | 'gote' | null } | null {
+  const f = /^[\s　]*天秤布石[\s　]*[：:][\s　]*(.+)$/m.exec(text);
+  if (!f) return null;
+  const fuseki = f[1]!.trim().split(/[\s　]+/);
+  if (!fuseki.length || !fuseki.every((u) => /^[PLNSGBRK]\*[1-9][a-i]$/.test(u))) {
+    throw new Error(`天秤布石のタグを駒打ちの並びとして読めない: ${f[1]!.trim()}`);
+  }
+  const c = /^[\s　]*天秤選択[\s　]*[：:][\s　]*(sente|gote)[\s　]*$/m.exec(text);
+  return { fuseki, chosen: c ? (c[1] as 'sente' | 'gote') : null };
+}
+
+/** KIF を読む。このアプリの方言、tenbinshogi.com の形、普通の KIF（平手・局面図つき）の 3 つ。 */
 export function parseKif(text: string): ParsedKif {
   const lines = normalizedKifLines(text);
   const headerEnd = lines.findIndex((l) => l.startsWith('手数--'));
   const headerLines = headerEnd >= 0 ? lines.slice(0, headerEnd) : lines;
   const tags = new Map(parseTags(headerLines.join('\n')));
   const kind = tags.get('手合割') ?? '';
-  let mode: Mode = kind.includes('天秤') ? 'tenbin' : kind.includes('布石') ? 'fuseki' : 'position';
+  // 方言（布石を指し手として書いた棋譜）では布石は本文にある。タグを見るのはそれ以外のときだけ
+  const dialect = kind.includes('天秤') || kind.includes('布石');
+  const tenbin = dialect ? null : parseTenbinTags(text);
+  let mode: Mode = dialect ? (kind.includes('天秤') ? 'tenbin' : 'fuseki') : tenbin ? 'tenbin' : 'position';
   let startSfen: string | undefined;
   if (mode === 'position') {
     const r = parseKifHeader(headerLines.join('\n'));
@@ -176,6 +202,17 @@ export function parseKif(text: string): ParsedKif {
   const timeControl = parseTimeControl(tags.get('持ち時間') ?? '');
   const tokens: string[] = [];
   const times: (MoveTime | undefined)[] = [];
+  if (tenbin) {
+    // 布石はタグから。選択は 2 手目（両玉を置いた直後）に入る
+    for (const [i, usi] of tenbin.fuseki.entries()) {
+      tokens.push(usi);
+      times.push(undefined);
+      if (i === 1 && tenbin.chosen) {
+        tokens.push(`choose:${tenbin.chosen}`);
+        times.push(undefined);
+      }
+    }
+  }
   let lastDest: Square | undefined;
   let ply = 0;
   const body = headerEnd >= 0 ? lines.slice(headerEnd + 1) : [];
@@ -199,7 +236,7 @@ export function parseKif(text: string): ParsedKif {
     if (mv === '切れ負け') { tokens.push('timeout'); times.push(time); break; }
     if (mv === '中断' || mv === '千日手' || mv === '持将棋' || mv === '不戦勝' || mv === '不戦敗' || mv === '反則勝ち' || mv === '反則負け' || mv === '入玉勝ち' || mv === '詰み' || mv === '不詰') break;
     ply++;
-    if (mode !== 'position' && ply <= 40) {
+    if (dialect && ply <= 40) {
       const usi = parseFusekiDrop(mv);
       if (!usi) throw new Error(`${ply}手目を布石の駒打ちとして読めない: ${mv}`);
       tokens.push(usi);
@@ -213,6 +250,14 @@ export function parseKif(text: string): ParsedKif {
     times.push(time);
     lastDest = md.to;
   }
+  // KIF でない文字を黙って平手 0 手として返さない（貼り付けが「読めた」ように見えるのを防ぐ）。
+  // parseKifHeader は局面図が無くても平手を返すので、startSfen の有無では見分けられない
+  const looksKif =
+    headerEnd >= 0 ||
+    tokens.length > 0 ||
+    /^[+|]/m.test(text) ||
+    KIF_TAGS.some((k) => tags.has(k));
+  if (!looksKif) throw new Error('KIF として読めない（棋譜の見出しも局面図も指し手も無い）');
   return { mode, startSfen, tokens, times, sente: tags.get('先手'), gote: tags.get('後手'), timeControl };
 }
 
