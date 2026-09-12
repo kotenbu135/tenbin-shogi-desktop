@@ -107,7 +107,9 @@ function writeTenbinKif(game: Game, meta: KifMeta): string {
   const tc = formatTimeControl(meta.timeControl ?? null);
   if (tc) lines.push(`持ち時間：${tc}`);
   const drops = game.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout');
-  if (drops.length) lines.push(`天秤布石：${drops.map((m) => m.usi).join(' ')}`);
+  // 布石が 0 手（玉を置く前に終わった対局）でもタグは書く。これが天秤将棋の目印で、
+  // 無いと局面図も指し手も無い棋譜になり、開き直したときに平手として読まれてしまう
+  lines.push(`天秤布石：${drops.map((m) => m.usi).join(' ')}`);
   if (game.chosenColor) lines.push(`天秤選択：${game.chosenColor}`);
   // 布石の消費時間はサイトの棋譜には無い。こちらは時計があるので、消えないように別のタグで持つ
   if (drops.some((m) => m.time)) lines.push(`天秤布石消費時間：${drops.map((m) => secsText(m.time)).join(' ')}`);
@@ -232,15 +234,17 @@ function parseFusekiDrop(text: string): string | null {
 function parseTenbinTags(
   text: string,
 ): { fuseki: string[]; chosen: 'sente' | 'gote' | null; times: (MoveTime | undefined)[] } | null {
-  const f = /^[\s　]*天秤布石[\s　]*[：:][\s　]*(.+)$/m.exec(text);
+  const f = /^[ \t　]*天秤布石[ \t　]*[：:][ \t　]*(.*)$/m.exec(text);
   if (!f) return null;
-  const fuseki = f[1]!.trim().split(/[\s　]+/);
-  if (!fuseki.length || !fuseki.every((u) => /^[PLNSGBRK]\*[1-9][a-i]$/.test(u))) {
-    throw new Error(`天秤布石のタグを駒打ちの並びとして読めない: ${f[1]!.trim()}`);
+  // 値が空のタグ（玉を置く前に終わった対局）も天秤将棋の目印として受ける
+  const raw = f[1]!.trim();
+  const fuseki = raw ? raw.split(/[\s　]+/) : [];
+  if (!fuseki.every((u) => /^[PLNSGBRK]\*[1-9][a-i]$/.test(u))) {
+    throw new Error(`天秤布石のタグを駒打ちの並びとして読めない: ${raw}`);
   }
-  const c = /^[\s　]*天秤選択[\s　]*[：:][\s　]*(sente|gote)[\s　]*$/m.exec(text);
+  const c = /^[ \t　]*天秤選択[ \t　]*[：:][ \t　]*(sente|gote)[ \t　]*$/m.exec(text);
   // 消費時間のタグはこのアプリだけが書く（サイトの棋譜には無い）。数が合わなければ時間だけ捨てる
-  const t = /^[\s　]*天秤布石消費時間[\s　]*[：:][\s　]*(.+)$/m.exec(text);
+  const t = /^[ \t　]*天秤布石消費時間[ \t　]*[：:][ \t　]*(.+)$/m.exec(text);
   const cells = t ? t[1]!.trim().split(/[\s　]+/) : [];
   const times =
     cells.length === fuseki.length

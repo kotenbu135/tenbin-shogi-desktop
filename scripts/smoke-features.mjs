@@ -115,5 +115,18 @@ await ev((t) => window.tenbin.load(t), k3);
 console.log('任意局面 KIF 読み込み:', await status());
 await page.screenshot({ path: `${OUT}/feat-position.png` });
 
+// 6. 玉を置く前に終わった対局も、保存して開き直せば天秤将棋のまま（平手にならない）
+await ev(() => window.tenbin.start('tenbin', null));
+await ev(() => window.tenbin.game().apply('resign'));
+const k4 = await ev(() => window.tenbin.kif());
+await ev((t) => window.tenbin.load(t), k4);
+console.log(
+  '玉を置く前の投了:',
+  'モード', await ev(() => window.tenbin.game().mode),
+  '| 手数', await ev(() => window.tenbin.game().moves.length),
+  '| タグ', JSON.stringify(k4.split('\n').filter((l) => l.startsWith('天秤'))),
+  '|', await status(),
+);
+
 console.log('errors:', errors.length ? errors : 'なし');
 await browser.close();

@@ -136,3 +136,11 @@ test('布石の消費時間のタグを読む（数が合わなければ時間�
   assert.deepEqual(bad.tokens, ['K*5i', 'K*5a', 'choose:sente', 'P*7g', 'P*3c']);
   assert.deepEqual(bad.times, [undefined, undefined, undefined, undefined, undefined]);
 });
+
+test('布石が 0 手の棋譜も天秤将棋として読む（平手にしない）', () => {
+  // 玉を置く前に投了した対局。局面図も指し手も無いので、タグだけが天秤将棋の目印になる
+  const r = parseKif(['# KIF形式棋譜ファイル 天秤将棋GUI', '先手：私', '後手：あなた', '天秤布石：', HEAD, '   1 投了'].join('\n'));
+  assert.equal(r.mode, 'tenbin');
+  assert.equal(r.startSfen, undefined);
+  assert.deepEqual(r.tokens, ['resign']);
+});
