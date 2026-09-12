@@ -838,6 +838,15 @@ async function main(): Promise<void> {
   }
 
   // ---- KIF ----
+  /**
+   * 保存の入口。天秤将棋と任意局面は形が 1 つ（布石はヘッダタグに入り、そのまま将棋ソフトでも
+   * 開ける）なので選ばせない。布石将棋だけは方言なので「本将棋の部分だけ」に意味がある。
+   */
+  function openSave(): void {
+    if (game.mode === 'fuseki') saveMenu.showModal();
+    else void saveKif(false);
+  }
+
   async function saveKif(normalOnly: boolean): Promise<void> {
     const text = normalOnly ? writeNormalOnlyKif(game, kifMeta()) : writeKif(game, kifMeta());
     if (text === null) {
@@ -973,7 +982,7 @@ async function main(): Promise<void> {
         void openKif();
         break;
       case 'save':
-        saveMenu.showModal();
+        openSave();
         break;
       case 'setup':
         void setupDialog.open();
@@ -1060,7 +1069,7 @@ async function main(): Promise<void> {
           return;
         case 's':
           e.preventDefault();
-          saveMenu.showModal();
+          openSave();
           return;
         case 'c':
           // 文字を選んでいるならその写しが先（棋譜の一部だけ写したいことがある）

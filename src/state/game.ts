@@ -244,6 +244,16 @@ export class Game {
     return r.isOk ? r.value : null;
   }
 
+  /**
+   * 布石の途中の盤（KIF の局面図に使う）。玉が両方とも盤に出る前は持ち駒に玉が居るので
+   * shogiops が局面として受け取らない。そのときは null（局面図の無い棋譜になる）。
+   */
+  fusekiPosition(): Shogi | null {
+    if (this.pos || this.mode === 'position') return null;
+    const r = parseSfen('standard', this.fuseki.toSfen(), false);
+    return r.isOk ? r.value : null;
+  }
+
   /** 布石フェーズの合法な駒打ち。kings フェーズでは玉だけに絞る。 */
   legalDrops(): Drop[] {
     if (this.pos || this.over) return [];

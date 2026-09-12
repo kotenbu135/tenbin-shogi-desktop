@@ -78,12 +78,69 @@ function stamp(d: Date): string {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** 対局全体を KIF（このアプリの方言）にする。 */
+/**
+ * 対局を KIF にする。形は 1 つ（tenbinshogi.com と同じ）で、貼り付け先によって読める量が変わる。
+ * 天秤将棋は 41 手目の局面を局面図に置き、布石をヘッダタグに入れる（＝将棋所や ShogiHome でも
+ * 開けて、このアプリなら玉の配置から並べ直せる）。布石将棋はこのアプリの方言のまま
+ * （先後の選択が無く、天秤将棋とは別のルールなので、同じタグに混ぜない）。
+ */
 export function writeKif(game: Game, meta: KifMeta = {}): string {
+  return game.mode === 'tenbin' ? writeTenbinKif(game, meta) : writeDialectKif(game, meta);
+}
+
+/** 布石の消費時間のタグ 1 つぶん。"3/12"（この手に 3 秒、通算 12 秒）。時間が無い手は "-" */
+function secsText(t: MoveTime | undefined): string {
+  return t ? `${t.elapsed}/${t.total}` : '-';
+}
+
+/**
+ * 天秤将棋の 1 局。布石 40 手と先後の選択はヘッダタグに、本将棋の手は局面図からの 1 手目として
+ * 並べる。布石を指し手として書かないのは、KIF に「空の盤＋持ち駒 20 枚（玉を含む）」を表す
+ * 書き方が無く、書くとどの将棋ソフトでも開けなくなるため。
+ */
+function writeTenbinKif(game: Game, meta: KifMeta): string {
   const lines: string[] = [];
   lines.push('# KIF形式棋譜ファイル 天秤将棋GUI');
   if (meta.startedAt) lines.push(`開始日時：${stamp(meta.startedAt)}`);
-  const kind = game.mode === 'tenbin' ? '天秤将棋' : game.mode === 'fuseki' ? '布石将棋' : 'その他';
+  lines.push(`先手：${meta.sente ?? ''}`);
+  lines.push(`後手：${meta.gote ?? ''}`);
+  const tc = formatTimeControl(meta.timeControl ?? null);
+  if (tc) lines.push(`持ち時間：${tc}`);
+  const drops = game.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout');
+  if (drops.length) lines.push(`天秤布石：${drops.map((m) => m.usi).join(' ')}`);
+  if (game.chosenColor) lines.push(`天秤選択：${game.chosenColor}`);
+  // 布石の消費時間はサイトの棋譜には無い。こちらは時計があるので、消えないように別のタグで持つ
+  if (drops.some((m) => m.time)) lines.push(`天秤布石消費時間：${drops.map((m) => secsText(m.time)).join(' ')}`);
+  // 局面図は 41 手目の局面。まだ本将棋に入っていなければ布石の途中の盤
+  const start = game.startPosition() ?? game.fusekiPosition();
+  if (start) lines.push(makeKifHeader(start));
+  lines.push('手数----指手---------消費時間--');
+  let n = 0;
+  for (const step of game.normalSteps()) {
+    n++;
+    lines.push(`${String(n).padStart(4, ' ')} ${pad(makeKifMoveOrDrop(step.pos, step.md, step.lastDest) ?? step.record.usi, 14)}${timeText(step.record.time)}`);
+  }
+  const last = game.moves[game.moves.length - 1];
+  const ended = !!last && (last.usi === 'resign' || last.usi === 'timeout');
+  if (ended) {
+    n++;
+    lines.push(`${String(n).padStart(4, ' ')} ${pad(last.usi === 'resign' ? '投了' : '切れ負け', 14)}${timeText(last.time)}`);
+  }
+  if (game.over) {
+    const w = game.over.winner;
+    // 「まで n 手」は局面図から数えた本将棋の手数（投了・切れ負けの行は数えない）
+    const played = ended ? n - 1 : n;
+    lines.push(w ? `まで${played}手で${colorName(w)}の勝ち` : `まで${played}手で引き分け`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** 布石将棋（と任意局面）の KIF。布石を指し手として書くこのアプリの方言。 */
+function writeDialectKif(game: Game, meta: KifMeta): string {
+  const lines: string[] = [];
+  lines.push('# KIF形式棋譜ファイル 天秤将棋GUI');
+  if (meta.startedAt) lines.push(`開始日時：${stamp(meta.startedAt)}`);
+  const kind = game.mode === 'fuseki' ? '布石将棋' : 'その他';
   lines.push(`手合割：${kind}`);
   if (game.mode === 'position') {
     const start = game.startPosition();
@@ -172,7 +229,9 @@ function parseFusekiDrop(text: string): string | null {
  * tenbinshogi.com が付けるヘッダタグ「天秤布石」「天秤選択」。KIF を正規化する前の生の文字から
  * 読む（正規化に落とされたり全角化されたりしても拾えるように、区切りは全角・半角の両方を見る）。
  */
-function parseTenbinTags(text: string): { fuseki: string[]; chosen: 'sente' | 'gote' | null } | null {
+function parseTenbinTags(
+  text: string,
+): { fuseki: string[]; chosen: 'sente' | 'gote' | null; times: (MoveTime | undefined)[] } | null {
   const f = /^[\s　]*天秤布石[\s　]*[：:][\s　]*(.+)$/m.exec(text);
   if (!f) return null;
   const fuseki = f[1]!.trim().split(/[\s　]+/);
@@ -180,7 +239,17 @@ function parseTenbinTags(text: string): { fuseki: string[]; chosen: 'sente' | 'g
     throw new Error(`天秤布石のタグを駒打ちの並びとして読めない: ${f[1]!.trim()}`);
   }
   const c = /^[\s　]*天秤選択[\s　]*[：:][\s　]*(sente|gote)[\s　]*$/m.exec(text);
-  return { fuseki, chosen: c ? (c[1] as 'sente' | 'gote') : null };
+  // 消費時間のタグはこのアプリだけが書く（サイトの棋譜には無い）。数が合わなければ時間だけ捨てる
+  const t = /^[\s　]*天秤布石消費時間[\s　]*[：:][\s　]*(.+)$/m.exec(text);
+  const cells = t ? t[1]!.trim().split(/[\s　]+/) : [];
+  const times =
+    cells.length === fuseki.length
+      ? cells.map((cell) => {
+          const m = /^(\d+)\/(\d+)$/.exec(cell);
+          return m ? { elapsed: Number(m[1]), total: Number(m[2]) } : undefined;
+        })
+      : [];
+  return { fuseki, chosen: c ? (c[1] as 'sente' | 'gote') : null, times };
 }
 
 /** KIF を読む。このアプリの方言、tenbinshogi.com の形、普通の KIF（平手・局面図つき）の 3 つ。 */
@@ -206,7 +275,7 @@ export function parseKif(text: string): ParsedKif {
     // 布石はタグから。選択は 2 手目（両玉を置いた直後）に入る
     for (const [i, usi] of tenbin.fuseki.entries()) {
       tokens.push(usi);
-      times.push(undefined);
+      times.push(tenbin.times[i]);
       if (i === 1 && tenbin.chosen) {
         tokens.push(`choose:${tenbin.chosen}`);
         times.push(undefined);

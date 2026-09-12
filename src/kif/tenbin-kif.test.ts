@@ -121,3 +121,18 @@ test('tenbinshogi.com が実際に出した棋譜（見本）を玉の配置か�
   assert.equal(r.sente, 'あなた');
   assert.equal(r.gote, '天秤 AI 3');
 });
+
+test('布石の消費時間のタグを読む（数が合わなければ時間だけ捨てる）', () => {
+  const head = ['天秤布石：K*5i K*5a P*7g P*3c', '天秤選択：sente'];
+  const r = parseKif([...head, '天秤布石消費時間：3/3 - 1/4 2/5', HEAD, '   1 ７六歩(77)'].join('\n'));
+  assert.deepEqual(r.tokens, ['K*5i', 'K*5a', 'choose:sente', 'P*7g', 'P*3c', '7g7f']);
+  assert.deepEqual(r.times[0], { elapsed: 3, total: 3 });
+  assert.equal(r.times[1], undefined);
+  assert.equal(r.times[2], undefined); // 選択の枠
+  assert.deepEqual(r.times[3], { elapsed: 1, total: 4 });
+  assert.deepEqual(r.times[4], { elapsed: 2, total: 5 });
+  // 数が合わないタグは無視する（棋譜そのものは読めるべき）
+  const bad = parseKif([...head, '天秤布石消費時間：3/3 1/4', HEAD].join('\n'));
+  assert.deepEqual(bad.tokens, ['K*5i', 'K*5a', 'choose:sente', 'P*7g', 'P*3c']);
+  assert.deepEqual(bad.times, [undefined, undefined, undefined, undefined, undefined]);
+});
