@@ -11,7 +11,7 @@ import { lang, t as tr } from '../i18n.ts';
 import type { EngineConfig, EngineState, Thinker } from '../usi/engine.ts';
 import { cpToP, pToCp } from '../usi/evalscale.ts';
 import type { UsiInfo } from '../usi/parse.ts';
-import type { Color, Mode, Phase } from '../state/game.ts';
+import type { Color, Mode, Phase, TenbinRules } from '../state/game.ts';
 import { BUILTIN_ID, isBuiltinId, normalEngine, type Settings } from '../settings.ts';
 import { MAX_SCORE, type EvalSource } from './graph.ts';
 
@@ -59,6 +59,8 @@ export interface Target {
   ply: number;
   /** 対局のルール。内蔵の評価が 1〜2 手目を玉置きと扱うかを決める */
   mode: Mode;
+  /** 天秤将棋のルールの版。内蔵の評価が二飛香を掛けて盤を並べるかを決める */
+  rules: TenbinRules;
 }
 
 /** info 1 行を先手の勝率と先手から見た cp・詰みに直す。評価の無い行（string だけなど）は null */
@@ -698,6 +700,7 @@ export class AnalysisPanel {
       s.paintTable(t);
       if (th.hasOption('MultiPV')) th.setOption('MultiPV', st.analysisMultiPv);
       if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', t.mode === 'tenbin' ? 'tenbin' : 'fuseki');
+      if (th.hasOption('Fuseki_Rules')) th.setOption('Fuseki_Rules', t.rules);
       const primary = this.slots[0] === s;
       await th.goInfinite(t.positionCmd, (info) => {
         // 同じ局面で setTarget が重なると target の実体が入れ替わる。局面が同じなら受ける

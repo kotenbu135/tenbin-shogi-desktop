@@ -48,6 +48,7 @@ const DICT = {
   err_read_position: { ja: '局面を読めない: {msg}', en: 'Cannot read the position: {msg}' },
   err_read_41: { ja: '41手目の局面を読めない: {msg}', en: 'Cannot read the move-41 position: {msg}' },
   err_rewind: { ja: 'wasm の局面を戻せない: {usi}', en: 'Cannot rewind the wasm position: {usi}' },
+  err_stopped_at: { ja: '{n}手目「{token}」で止まりました: {msg}', en: 'Stopped at move {n} “{token}”: {msg}' },
 
   // ---- 局面の案内（下の帯） ----
   st_place_sente: { ja: '置く人が、先手陣に先手玉を置きます', en: 'The placer puts the Sente king in Sente’s camp' },
@@ -67,6 +68,8 @@ const DICT = {
   role_chooser: { ja: '先後を選ぶ', en: 'picks the side' },
   name_with_role: { ja: '{name}（{role}）', en: '{name} ({role})' },
   game_tenbin: { ja: '天秤将棋', en: 'Balance Shogi' },
+  // 二飛香を加える前の天秤将棋の棋譜を開いたとき（state/game.ts の rulesForTokens）。公開サイトと同じ言い方
+  game_tenbin_v1: { ja: '天秤将棋（二飛香を加える前のルール）', en: 'Balance Shogi (rules before Nihikyō)' },
   game_fuseki: { ja: '布石将棋', en: 'Fuseki Shogi' },
   game_normal: { ja: '本将棋', en: 'Shogi' },
   game_normal_pos: { ja: '本将棋（任意の局面から）', en: 'Shogi (from a set position)' },
@@ -178,6 +181,10 @@ const DICT = {
   msg_copy_failed: { ja: '棋譜を写せません: {msg}', en: 'Cannot copy the record: {msg}' },
   msg_pasted: { ja: '貼り付けた棋譜を開きました（{n} 手）', en: 'Opened the pasted record ({n} moves)' },
   msg_paste_unreadable: { ja: '棋譜として読めません: {msg}', en: 'Not a readable game record: {msg}' },
+  msg_old_rules: {
+    ja: '二飛香を加える前のルールで指された棋譜なので、そのルールで再生しています。',
+    en: 'This game was played before the Nihikyō rule was added, so it is replayed under the old rules.',
+  },
   msg_settings_broken: {
     ja: '設定を読めなかったので既定のまま開いています（{msg}）。次に保存するとき、読めなかった設定は退避します',
     en: 'The settings could not be read, so defaults are in use ({msg}). The unreadable settings will be set aside on the next save',
@@ -306,8 +313,8 @@ const DICT = {
   ng_title: { ja: '新しい対局', en: 'New game' },
   ng_rule: { ja: 'ルール', en: 'Rules' },
   ng_rule_tenbin: {
-    ja: '天秤将棋。一方が両方の玉を置き、もう一方が先後を選ぶ',
-    en: 'Balance Shogi. One player places both kings, the other picks the side',
+    ja: '天秤将棋。一方が両方の玉を置き、もう一方が先後を選ぶ。布石では自陣の同じ筋に飛・香を合わせて1枚まで（二飛香）',
+    en: 'Balance Shogi. One player places both kings, the other picks the side. During placement, each file holds at most one of your rook and lances (Nihikyō)',
   },
   ng_rule_fuseki: {
     ja: '布石将棋。空の盤に交互に20枚ずつ打ってから指す',
@@ -747,6 +754,10 @@ const DICT = {
   },
   fk_piecetype: { ja: 'PieceType の対応がズレている: pt={pt} は \'{got}\'', en: 'PieceType mapping is off: pt={pt} is \'{got}\'' },
   fk_illegal: { ja: '布石フェーズの合法手ではない: {usi}', en: 'Not a legal placement move: {usi}' },
+  fk_rule_nihikyo: {
+    ja: '布石のルールの旗（二飛香）の値が合わない: {got}（wasm が古いか、FusekiRule がズレている）',
+    en: 'The placement rule flag (Nihikyō) does not match: {got} (the wasm is outdated or FusekiRule has drifted)',
+  },
   // <<DICT_END>>
 } as const satisfies Record<string, Entry>;
 

@@ -20,8 +20,11 @@ import { makeWesternMoveOrDrop } from 'shogiops/notation/western';
 import { lang, sideName, t } from '../i18n.ts';
 import type { Shogi } from 'shogiops/variant/shogi';
 import type { MoveOrDrop, Piece as OpsPiece, Role as OpsRole, Square } from 'shogiops/types';
-import { BLACK, WHITE, type Drop, type Fuseki } from '../rules/fuseki.ts';
+import { BLACK, TENBIN_RULES, TENBIN_RULES_V1, WHITE, fusekiRulesOf, type Drop, type Fuseki, type TenbinRules } from '../rules/fuseki.ts';
 import type { MoveTime } from './clock.ts';
+
+// ルールの版は rules/fuseki.ts に置き、対局を扱う側がここから引けるように出し直す
+export { TENBIN_RULES, TENBIN_RULES_V1, type TenbinRules };
 
 export type Color = 'sente' | 'gote';
 export type Phase = 'kings' | 'choose' | 'fuseki' | 'normal' | 'over';
@@ -182,11 +185,14 @@ export class Game {
 
   private readonly fuseki: Fuseki;
   readonly mode: Mode;
+  /** 天秤将棋のルールの版。旧ルールの棋譜を開いたときだけ 1。待った・分岐・過去の局面にも引き継ぐ */
+  readonly rules: TenbinRules;
 
-  constructor(fuseki: Fuseki, mode: Mode, startSfen?: string) {
+  constructor(fuseki: Fuseki, mode: Mode, startSfen?: string, rules: TenbinRules = TENBIN_RULES) {
     this.fuseki = fuseki;
     this.mode = mode;
-    fuseki.reset();
+    this.rules = rules;
+    fuseki.reset(this.fusekiRules);
     this.basePly = mode === 'position' ? 0 : 40;
     if (mode === 'position') {
       const sfen = startSfen ?? HIRATE_SFEN;
@@ -195,6 +201,11 @@ export class Game {
       this.pos = r.value;
       this.startSfen = sfen;
     }
+  }
+
+  /** 布石の wasm に渡す禁じ手の旗。同じ手順を別の Fuseki で並べる口（内蔵の評価）にも、これを渡す */
+  get fusekiRules(): number {
+    return fusekiRulesOf(this.mode === 'tenbin', this.rules);
   }
 
   get phase(): Phase {
@@ -547,7 +558,10 @@ export class Game {
   viewAt(index: number): ViewState {
     const n = Math.max(0, Math.min(index, this.moves.length));
     if (n === this.moves.length) return this.view();
-    const g = rebuild(this.fuseki, this.mode, this.tokens().slice(0, n), { startSfen: this.mode === 'position' ? this.startSfen ?? undefined : undefined });
+    const g = rebuild(this.fuseki, this.mode, this.tokens().slice(0, n), {
+      startSfen: this.mode === 'position' ? this.startSfen ?? undefined : undefined,
+      rules: this.rules,
+    });
     const v = g.view();
     this.resyncWasm();
     return v;
@@ -560,7 +574,7 @@ export class Game {
 
   /** wasm の局面を自分の棋譜どおりに戻す（viewAt の後始末）。 */
   private resyncWasm(): void {
-    this.fuseki.reset();
+    this.fuseki.reset(this.fusekiRules);
     if (this.mode === 'position') return;
     for (const m of this.moves) {
       if (m.phase === 'normal' || m.ply === null || m.usi === 'resign' || m.usi === 'timeout') continue;
@@ -574,11 +588,45 @@ export class Game {
 export interface RebuildOptions {
   startSfen?: string;
   times?: (MoveTime | undefined)[];
+  /** 天秤将棋のルールの版。省略するといまの版 */
+  rules?: TenbinRules;
 }
 
-/** トークン列から対局を作り直す（待った・棋譜の読み込み・過去の局面の表示）。 */
+/**
+ * トークン列から対局を作り直す（待った・棋譜の読み込み・過去の局面の表示）。
+ * 入らない手があれば、何手目のどの手で止まったかを添えて投げる（黙って途中まで並べない）。
+ */
 export function rebuild(fuseki: Fuseki, mode: Mode, tokens: string[], opts: RebuildOptions = {}): Game {
-  const g = new Game(fuseki, mode, opts.startSfen);
-  tokens.forEach((t, i) => g.apply(t, opts.times?.[i]));
+  const g = new Game(fuseki, mode, opts.startSfen, opts.rules);
+  tokens.forEach((token, i) => {
+    const n = g.nextPly;
+    try {
+      g.apply(token, opts.times?.[i]);
+    } catch (e) {
+      throw new Error(t('err_stopped_at', { n, token, msg: e instanceof Error ? e.message : String(e) }));
+    }
+  });
   return g;
+}
+
+/**
+ * 版の書かれていない天秤将棋の手順を、どの版のルールで再生するか。いまの版で最後まで入れば
+ * いまの版、入らず二飛香の前の版なら入るならそちら。どちらでも入らなければいまの版を返す
+ * （どこで止まったかは、その版で rebuild した呼び手が言う）。
+ *
+ * 両方の版で入る手順は、どちらで再生しても同じ盤・同じ結果になる（版で変わるのは打てる手の
+ * 候補だけで、41手目の裁定は盤しか見ない）。だから先に試した版で決めてよい。
+ *
+ * fuseki の局面を上書きするので、呼んだ後は Game を作り直すか resync すること。
+ */
+export function rulesForTokens(fuseki: Fuseki, tokens: string[]): TenbinRules {
+  const fits = (rules: TenbinRules): boolean => {
+    try {
+      rebuild(fuseki, 'tenbin', tokens, { rules });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return fits(TENBIN_RULES) || !fits(TENBIN_RULES_V1) ? TENBIN_RULES : TENBIN_RULES_V1;
 }

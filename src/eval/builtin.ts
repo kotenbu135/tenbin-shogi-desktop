@@ -12,7 +12,7 @@
 //   - 40 手目で後手玉が先手の利きに当たる形は勝率 0
 import * as ort from 'onnxruntime-web/wasm';
 import { t } from '../i18n.ts';
-import { BLACK, FEATURE_PLANES, Fuseki, type Drop, type FusekiColor } from '../rules/fuseki.ts';
+import { BLACK, FEATURE_PLANES, Fuseki, TENBIN_RULES, fusekiRulesOf, type Drop, type FusekiColor, type TenbinRules } from '../rules/fuseki.ts';
 import type { EngineConfig, EngineState, LogDirection, Thinker } from '../usi/engine.ts';
 import type { Bestmove, UsiInfo } from '../usi/parse.ts';
 import type { EvalScale } from '../usi/evalscale.ts';
@@ -206,13 +206,19 @@ export class BuiltinEvaluator implements Thinker {
 
   /** ルール。天秤将棋なら 1〜2 手目を両玉の置き場として扱う。position 行からは区別できないので受け取る */
   private fusekiMode: 'tenbin' | 'fuseki' | null = null;
+  /**
+   * 天秤将棋のルールの版（1=二飛香の前、2=いま）。旧ルールの棋譜を検討するときに 1 が来る。
+   * 版を取り違えると、盤を並べ直すところで旧ルールの手が反則になり、検討が止まる
+   */
+  private tenbinRules: TenbinRules = TENBIN_RULES;
 
   setOption(name: string, value: string | number): void {
     if (name === 'Fuseki_Mode') this.fusekiMode = value === 'tenbin' ? 'tenbin' : 'fuseki';
+    if (name === 'Fuseki_Rules') this.tenbinRules = Number(value) === 1 ? 1 : TENBIN_RULES;
   }
 
   hasOption(name: string): boolean {
-    return name === 'Fuseki_Mode';
+    return name === 'Fuseki_Mode' || name === 'Fuseki_Rules';
   }
 
   async stop(): Promise<void> {
@@ -239,7 +245,7 @@ export class BuiltinEvaluator implements Thinker {
     try {
       // ルールが渡されていないときだけ、手数から推し量る（布石将棋の 1〜2 手目を玉置きと誤るので、渡すのが本筋）
       const tenbin = this.fusekiMode ? this.fusekiMode === 'tenbin' : /choose:/.test(positionCmd) || tokens.length < 2;
-      const r = await this.evaluate(tokens, this.method, { tenbin });
+      const r = await this.evaluate(tokens, this.method, { tenbin, rules: this.tenbinRules });
       if (gen !== this.generation) return;
       const ms = Math.round(performance.now() - t0);
       // 後ろから流す。1 位の info が来た時点で全候補が揃っているので、受け手が 1 位だけを合図にしても取りこぼさない
@@ -274,8 +280,9 @@ export class BuiltinEvaluator implements Thinker {
   }
 
   // ---- 盤の準備 ----
-  private setPosition(tokens: string[]): void {
-    this.fuseki.reset();
+  /** 手順を並べる。rules は布石の禁じ手の旗（Game.fusekiRules と同じ値）。対局の盤と同じ禁じ手で並べる */
+  private setPosition(tokens: string[], rules: number): void {
+    this.fuseki.reset(rules);
     for (const tok of tokens) this.fuseki.drop(tok);
   }
 
@@ -338,15 +345,17 @@ export class BuiltinEvaluator implements Thinker {
   }
 
   /** 候補の勝率。呼び出しは直列にする（盤が 1 つしか無い） */
-  evaluate(tokens: string[], method: BuiltinMethod, opts: { tenbin: boolean }): Promise<BuiltinResult> {
+  /** @param opts.rules 天秤将棋のルールの版。省略するといまの版（二飛香あり） */
+  evaluate(tokens: string[], method: BuiltinMethod, opts: { tenbin: boolean; rules?: TenbinRules }): Promise<BuiltinResult> {
     const run = () => this.evaluateNow(tokens, method, opts);
     const next = this.shared.chain.then(run, run);
     this.shared.chain = next.then(() => undefined, () => undefined);
     return next;
   }
 
-  private async evaluateNow(tokens: string[], method: BuiltinMethod, opts: { tenbin: boolean }): Promise<BuiltinResult> {
-    this.setPosition(tokens);
+  private async evaluateNow(tokens: string[], method: BuiltinMethod, opts: { tenbin: boolean; rules?: TenbinRules }): Promise<BuiltinResult> {
+    const rules = fusekiRulesOf(opts.tenbin, opts.rules ?? TENBIN_RULES);
+    this.setPosition(tokens, rules);
     const ply = this.fuseki.ply;
     const color = this.fuseki.turn;
     let legal = this.fuseki.legalDrops();
@@ -395,7 +404,7 @@ export class BuiltinEvaluator implements Thinker {
     const lost: boolean[] = [];
     const done: boolean[] = [];
     for (const c of cands) {
-      this.setPosition(tokens);
+      this.setPosition(tokens, rules);
       this.fuseki.drop(c);
       const isDone = this.fuseki.isPlacementDone;
       done.push(isDone);
@@ -418,7 +427,7 @@ export class BuiltinEvaluator implements Thinker {
       const candLegal: Drop[][] = [];
       const candColor: FusekiColor[] = [];
       for (let i = 0; i < cands.length; i++) {
-        this.setPosition(tokens);
+        this.setPosition(tokens, rules);
         this.fuseki.drop(cands[i]!);
         let replies = this.fuseki.legalDrops();
         if (opts.tenbin && ply + 1 < 2) replies = replies.filter((d) => d.role === 'king');
@@ -434,7 +443,7 @@ export class BuiltinEvaluator implements Thinker {
         const rp = this.priors(candLogits[k++]!, replies, candColor[i]!);
         const top = [...replies.keys()].sort((a, b) => rp[b]! - rp[a]!).slice(0, CANDIDATES);
         for (const j of top) {
-          this.setPosition(tokens);
+          this.setPosition(tokens, rules);
           this.fuseki.drop(cands[i]!);
           this.fuseki.drop(replies[j]!);
           if (this.fuseki.isPlacementDone && !this.fuseki.verifyFinalSfen(this.fuseki.toSfen())) {
@@ -466,10 +475,11 @@ export class BuiltinEvaluator implements Thinker {
    * 対局の 1 手。方策の温度でサンプリングし、search を付けると K 本引いて価値ネットで最善を選ぶ
    * （公開サイトのレベルと同じ流儀。温度 1.0 → 0.4 で強くなる）。
    */
-  async pickMove(tokens: string[], opts: { temperature: number; search: number; tenbin: boolean; rng?: () => number }): Promise<string> {
+  async pickMove(tokens: string[], opts: { temperature: number; search: number; tenbin: boolean; rules?: TenbinRules; rng?: () => number }): Promise<string> {
     const rng = opts.rng ?? Math.random;
+    const rules = fusekiRulesOf(opts.tenbin, opts.rules ?? TENBIN_RULES);
     const run = async (): Promise<string> => {
-      this.setPosition(tokens);
+      this.setPosition(tokens, rules);
       const ply = this.fuseki.ply;
       const color = this.fuseki.turn;
       let legal = this.fuseki.legalDrops();
@@ -511,7 +521,7 @@ export class BuiltinEvaluator implements Thinker {
       const feats: { input1: Float32Array; input2: Float32Array }[] = [];
       const lost: boolean[] = [];
       for (const i of picks) {
-        this.setPosition(tokens);
+        this.setPosition(tokens, rules);
         this.fuseki.drop(legal[i]!);
         lost.push(this.fuseki.isPlacementDone && !this.fuseki.verifyFinalSfen(this.fuseki.toSfen()));
         feats.push(this.fuseki.policyInputs());

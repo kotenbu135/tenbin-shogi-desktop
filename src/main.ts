@@ -3,7 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Fuseki } from './rules/fuseki.ts';
-import { Game, rebuild, squareLabel, colorMark, overReasonText, type Mode, type ViewState, type Color } from './state/game.ts';
+import { Game, rebuild, rulesForTokens, squareLabel, colorMark, overReasonText, TENBIN_RULES, type Mode, type TenbinRules, type ViewState, type Color } from './state/game.ts';
 import { lang, setLang, sideName, t, type Lang } from './i18n.ts';
 import { Clock, type TimeControl } from './state/clock.ts';
 import { BUILTIN_ID, isBuiltinId, loadSettings, newModelSetId, saveSettings, settingsLoadError, type Settings } from './settings.ts';
@@ -408,7 +408,7 @@ async function main(): Promise<void> {
     if (v.phase !== 'over') stage = v.phase;
     else if (game.mode === 'position' || v.ply >= 40) stage = 'normal';
     else stage = game.mode === 'tenbin' && v.ply < 2 ? 'kings' : 'fuseki';
-    return { positionCmd: v.positionCmd, phase: v.phase, stage, turn: v.turn, ply: v.ply, mode: game.mode };
+    return { positionCmd: v.positionCmd, phase: v.phase, stage, turn: v.turn, ply: v.ply, mode: game.mode, rules: game.rules };
   }
   const kifu = new KifuList($('kifu'), {
     onSeek: (c) => {
@@ -439,7 +439,7 @@ async function main(): Promise<void> {
   /** 表示中の局面の Game。過去を見ているときは一時的に作る（読み筋の符号化に使う） */
   function viewGame(): Game {
     if (cursor === null) return game;
-    const g = rebuild(fuseki, game.mode, game.tokens().slice(0, cursor), { startSfen: game.normalStartSfen ?? undefined });
+    const g = rebuild(fuseki, game.mode, game.tokens().slice(0, cursor), { startSfen: game.normalStartSfen ?? undefined, rules: game.rules });
     game.resync(); // wasm を最新に戻す
     return g;
   }
@@ -542,7 +542,7 @@ async function main(): Promise<void> {
     if (cursor === null) return;
     const tokens = game.tokens().slice(0, cursor);
     const times = game.times().slice(0, cursor);
-    game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times });
+    game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times, rules: game.rules });
     cursor = null;
     dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
@@ -563,7 +563,7 @@ async function main(): Promise<void> {
     cursor = null;
     const tokens = game.tokens().slice(0, -1);
     const times = game.times().slice(0, -1);
-    game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times });
+    game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times, rules: game.rules });
     dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
     // 残り時間を記録から組み直す（枠の入れ替えも時間切れで 0 にした分もここで戻る）
@@ -746,7 +746,7 @@ async function main(): Promise<void> {
     title.className = 'game-title';
     title.textContent =
       game.mode === 'tenbin'
-        ? t('game_tenbin')
+        ? t(game.rules === TENBIN_RULES ? 'game_tenbin' : 'game_tenbin_v1')
         : game.mode === 'fuseki'
           ? t('game_fuseki')
           : t(game.normalStartSfen === START_SFEN ? 'game_normal' : 'game_normal_pos');
@@ -878,22 +878,36 @@ async function main(): Promise<void> {
     if (typeof path !== 'string') return;
     try {
       const text = await invoke<string>('read_text_file', { path });
-      loadKifText(text);
-      say(t('msg_opened', { path }));
+      const rules = loadKifText(text);
+      say(t('msg_opened', { path }) + oldRulesNote(rules));
     } catch (e) {
       say(t('msg_kif_unreadable', { msg: e instanceof Error ? e.message : String(e) }), true);
     }
   }
 
-  function loadKifText(text: string): void {
+  /**
+   * 棋譜を読んで対局を差し替える。返すのは天秤将棋のルールの版（読み込みの知らせに旧ルールと添えるため）。
+   * 棋譜には版が書かれないので、二飛香に当たって入らず旧ルールなら入る天秤将棋の棋譜は旧ルールで並べる
+   * （公開サイトと同じ扱い）。どちらでも入らなければ、いまの版で止まった手を言って落とす
+   */
+  function loadKifText(text: string): TenbinRules {
     const k = parseKif(text);
+    let next: Game;
+    try {
+      const rules = k.mode === 'tenbin' ? rulesForTokens(fuseki, k.tokens) : TENBIN_RULES;
+      next = rebuild(fuseki, k.mode, k.tokens, { startSfen: k.startSfen, times: k.times, rules });
+    } catch (e) {
+      // 判定と再生で wasm の局面を上書きしている。読めなかったときは今の対局の局面へ戻す
+      game.resync();
+      throw e;
+    }
     void analysis.stop();
     void driver.abort();
     void kifuAnalyzer.stop();
     analysis.clearPlayers();
     flipLocked = false;
     if (editor) exitEditor();
-    game = rebuild(fuseki, k.mode, k.tokens, { startSfen: k.startSfen, times: k.times });
+    game = next;
     meta = { sente: k.sente ?? '', gote: k.gote ?? '', timeControl: k.timeControl, startedAt: new Date() };
     attachClock(new Clock(k.timeControl));
     cursor = null;
@@ -901,6 +915,12 @@ async function main(): Promise<void> {
     shapes = [];
     board.clearSelection();
     paintAll();
+    return game.rules;
+  }
+
+  /** 読み込みの知らせに添える一言。旧ルールで並べたときだけ */
+  function oldRulesNote(rules: TenbinRules): string {
+    return rules === TENBIN_RULES ? '' : ` ${t('msg_old_rules')}`;
   }
 
   // ---- ツールバー ----
@@ -1039,8 +1059,8 @@ async function main(): Promise<void> {
     if (!text.trim()) return;
     if (game.moves.length > 0 && game.phase !== 'over' && !confirm(t('confirm_paste'))) return;
     try {
-      loadKifText(text);
-      say(t('msg_pasted', { n: game.moves.length }));
+      const rules = loadKifText(text);
+      say(t('msg_pasted', { n: game.moves.length }) + oldRulesNote(rules));
     } catch (e) {
       say(t('msg_paste_unreadable', { msg: e instanceof Error ? e.message : String(e) }), true);
     }

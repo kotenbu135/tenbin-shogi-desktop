@@ -404,6 +404,7 @@ export class MatchDriver {
       try {
         await builtin.start();
         builtin.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
+        builtin.setOption('Fuseki_Rules', g.rules);
         await builtin.goInfinite(g.positionCommand(), onInfo);
         // 内蔵の評価は読みが一瞬で終わる。ここで 1 度画面に描かせないと、候補の矢印が
         // 出る間もなく次の手が指されてしまう（外のエンジンは読んでいる間ずっと出ている）
@@ -411,7 +412,7 @@ export class MatchDriver {
       } catch (e) {
         this.deps.onLog(t('pl_builtin_label'), 'sys', t('pl_builtin_no_move', { msg: e instanceof Error ? e.message : String(e) }));
       }
-      return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin });
+      return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin, rules: g.rules });
     }
     if (isBuiltinId(spec.fusekiId)) throw new Error(t('pl_builtin_missing'));
     const th = this.thinker(seat, spec.fusekiId);

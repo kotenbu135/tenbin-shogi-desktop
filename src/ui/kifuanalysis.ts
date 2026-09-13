@@ -86,6 +86,7 @@ export class KifuAnalyzer {
         let last: UsiInfo | null = null;
         try {
           if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', target.mode === 'tenbin' ? 'tenbin' : 'fuseki');
+          if (th.hasOption('Fuseki_Rules')) th.setOption('Fuseki_Rules', target.rules);
           await th.go(target.positionCmd, `movetime ${Math.round(opts.secPerMove * 1000)}`, (info) => {
             if ((info.multipv ?? 1) === 1 && (info.scoreCp !== undefined || info.scoreMate !== undefined || info.winrate !== undefined)) last = info;
           });

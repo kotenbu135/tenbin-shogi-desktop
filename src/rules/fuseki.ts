@@ -40,6 +40,30 @@ export interface Drop {
 
 export const FEATURE_PLANES = { input1: 62, input2: 59, squares: 81 } as const;
 
+/**
+ * cppshogi の FusekiRule（cppshogi/fuseki.hpp）。reset() に渡す、布石のルールに足す禁じ手の旗。
+ * 0 は shogitter の布石将棋そのまま。値は load() で fw_rule_nihikyo と照合する。
+ */
+export const FUSEKI_RULE_NONE = 0;
+/** 二飛香（天秤将棋、2026-09-13 決定）。自陣の同じ筋に自分の飛・香を合わせて 2 枚以上打てない */
+export const FUSEKI_RULE_NIHIKYO = 1;
+
+/**
+ * 天秤将棋のルールの版。棋譜（手順・KIF）には書かれないので、版の無い手順は state/game.ts の
+ * rulesForTokens() で決める（公開サイト fuseki-shogi-web の balanceRules と同じ値）。
+ *   1 … 二飛香の前。布石の禁じ手は布石将棋と同じ
+ *   2 … 二飛香を加えた版（2026-09-13 の決定、GitHub Issue #1）
+ * 布石将棋には版が無く、shogitter のルールのまま変えない。
+ */
+export type TenbinRules = 1 | 2;
+export const TENBIN_RULES_V1: TenbinRules = 1;
+export const TENBIN_RULES: TenbinRules = 2;
+
+/** 布石の wasm に渡す禁じ手の旗。二飛香は天秤将棋の 2 版からで、布石将棋には掛けない */
+export function fusekiRulesOf(tenbin: boolean, rules: TenbinRules): number {
+  return tenbin && rules >= TENBIN_RULES ? FUSEKI_RULE_NIHIKYO : FUSEKI_RULE_NONE;
+}
+
 // Emscripten モジュールのうち使う部分だけ。
 interface EmModule {
   ccall(name: string, ret: 'number', argTypes: string[], args: unknown[]): number;
@@ -76,11 +100,20 @@ export class Fuseki {
       const got = M.ccall('fw_move_to_usi', 'string', ['number', 'number'], [pt, 0]);
       if (got[0] !== usi) throw new Error(t('fk_piecetype', { pt, got: String(got[0]) }));
     }
+    // 二飛香の旗。古い wasm には口が無く、値がズレていれば天秤将棋で禁じ手が黙って効かない
+    let nihikyo: number | null;
+    try {
+      nihikyo = M.ccall('fw_rule_nihikyo', 'number', [], []);
+    } catch {
+      nihikyo = null;
+    }
+    if (nihikyo !== FUSEKI_RULE_NIHIKYO) throw new Error(t('fk_rule_nihikyo', { got: String(nihikyo) }));
     return new Fuseki(M);
   }
 
-  reset(): void {
-    this.M.ccall('fw_reset', null, [], []);
+  /** 空の盤に戻す。rules は FUSEKI_RULE_* の組み合わせで、次の reset まで効く */
+  reset(rules: number = FUSEKI_RULE_NONE): void {
+    this.M.ccall('fw_reset', null, ['number'], [rules]);
   }
 
   get ply(): number {

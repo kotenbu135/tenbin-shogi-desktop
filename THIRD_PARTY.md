@@ -21,6 +21,7 @@ CSS で回してはいけない。玉将（GY）は先手、王将（OU）は後
 `public/wasm/fuseki.{mjs,wasm}` は dlshogi（GPL-3.0）のフォーク
 [kotenbu135/DeepLearningShogi](https://github.com/kotenbu135/DeepLearningShogi) の
 `cppshogi` を Emscripten でビルドしたもの。ビルド手順は公開版サイトの `wasm/build.sh`。
+同梱しているのは fork の `5cf6c9c`（天秤将棋の二飛香を加えたコミット）から、公開サイトの `e8bd37f` で作ったもの。
 
 ## 学習済みモデル（`public/models/`）
 
