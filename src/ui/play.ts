@@ -420,6 +420,8 @@ export class MatchDriver {
     this.sendMultiPv(th);
     // 布石は天秤将棋と布石将棋で最初の 2 手の意味が違う。position 行からは区別できないので渡す
     if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
+    // ルールの版は position より先に送る（外のエンジンは次の position の盤から版を効かせる）
+    if (th.hasOption('Fuseki_Rules')) th.setOption('Fuseki_Rules', g.rules);
     const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
     return bm.move === 'resign' ? 'resign' : bm.move;
   }
