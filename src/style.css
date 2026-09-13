@@ -381,7 +381,8 @@ input[type='text'], input[type='number'], input:not([type]), select, textarea {
   padding: 0; border: 0; border-radius: 2px; background: transparent;
 }
 /* 玉が無いとき（本将棋）は歩を2列ぶん使う。先手は最後、後手は最初 */
-.stand-pieces:not(.with-king) .slot[data-role='pawn'] { grid-column: span 2; }
+/* 幅が 2 倍になっても高さは 1 列の枠と同じにする（選択の色が縦に伸びないように） */
+.stand-pieces:not(.with-king) .slot[data-role='pawn'] { grid-column: span 2; aspect-ratio: 2 / 1.09; }
 .stand-pieces:not(.with-king) .slot[data-role='pawn'] .piece { inset: 4% 27% 3% 27%; }
 .slot:hover { background: transparent; }
 .slot:hover:not(:disabled) { background: rgba(255, 255, 255, 0.28); }
