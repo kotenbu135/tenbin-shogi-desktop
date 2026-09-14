@@ -438,6 +438,56 @@ const DICT = {
   eng_bad_bestmove: { ja: 'bestmove を読めない: {line}', en: 'Cannot read the bestmove: {line}' },
   eng_stop_ignored: { ja: 'エンジンが stop に応答しない', en: 'The engine does not answer stop' },
   eng_killed: { ja: 'エンジンを止めた', en: 'The engine was stopped' },
+  eng_provider_log: { ja: '推論: {provider}{detail}', en: 'Inference: {provider}{detail}' },
+  eng_provider_fallback_log: { ja: '{from} は使えなかった: {error}', en: '{from} could not be used: {error}' },
+
+  // ---- CUDA 版への切り替えの案内（ui/cuda.ts） ----
+  cuda_switch_title: { ja: 'CUDA 版に切り替えると速くなります', en: 'The CUDA build would be faster' },
+  cuda_switch_lead: {
+    ja: '「{name}」は {provider} で読んでいます。この PC には NVIDIA の GPU（{gpu}）があるので、エンジンのフォルダの DLL を CUDA 版に差し替えると、読みの速さがおよそ {factor} 倍になります（RTX 5070 Ti の実測で 1 秒あたり CPU 約 370・DirectML 約 2,200・CUDA 約 9,500 局面）。',
+    en: '“{name}” is running on {provider}. This PC has an NVIDIA GPU ({gpu}), so replacing the DLLs in the engine folder with the CUDA build makes it search about {factor}× as fast (measured on an RTX 5070 Ti: about 370 nodes/s on the CPU, 2,200 with DirectML and 9,500 with CUDA).',
+  },
+  cuda_switch_need: {
+    ja: 'CUDA 12 と cuDNN 9 の DLL（合わせて 2GB 前後）を NVIDIA から入れる必要があります。このアプリにもエンジンにも NVIDIA のライブラリは入っていません。',
+    en: 'You need the CUDA 12 and cuDNN 9 libraries from NVIDIA (about 2 GB together). Neither this app nor the engine ships NVIDIA libraries.',
+  },
+  cuda_fallback_title: { ja: 'CUDA に切り替えられませんでした', en: 'Could not switch to CUDA' },
+  cuda_fallback_lead: {
+    ja: '「{name}」は CUDA を試しましたが、足りない DLL があって使えず、{provider} で読んでいます（止まってはいません）。ONNX Runtime のエラー文（足りない DLL の名前が入っています）:',
+    en: '“{name}” tried CUDA but a library is missing, so it is running on {provider} instead (it has not stopped). The ONNX Runtime error names the missing DLL:',
+  },
+  cuda_fallback_fix: { ja: '次の DLL を置いてから、エンジンを立て直してください。', en: 'Put the following DLLs in place, then restart the engine.' },
+  cuda_step1: {
+    ja: 'ONNX Runtime 1.30.0 の配布ページから <code>onnxruntime-win-x64-gpu_cuda12-1.30.0.zip</code> を取り、その <code>lib/</code> の <code>onnxruntime.dll</code>・<code>onnxruntime_providers_cuda.dll</code>・<code>onnxruntime_providers_shared.dll</code> を、エンジンのフォルダの同名のファイルに上書きする（<code>DirectML.dll</code> は残してよい。元の 3 つを別の場所に写しておけば DirectML 版に戻せる）',
+    en: 'From the ONNX Runtime 1.30.0 release page, get <code>onnxruntime-win-x64-gpu_cuda12-1.30.0.zip</code> and copy <code>onnxruntime.dll</code>, <code>onnxruntime_providers_cuda.dll</code> and <code>onnxruntime_providers_shared.dll</code> from its <code>lib/</code> over the files of the same name in the engine folder (<code>DirectML.dll</code> can stay; keep a copy of the original three to go back to DirectML)',
+  },
+  cuda_step2: {
+    ja: 'CUDA 12 の <code>cudart64_12.dll</code>・<code>cublas64_12.dll</code>・<code>cublasLt64_12.dll</code>・<code>cufft64_11.dll</code> と、cuDNN 9 の <code>cudnn*64_9.dll</code> 一式を、エンジンのフォルダか <code>PATH</code> の通った場所に置く（NVIDIA から CUDA Toolkit 12.x と cuDNN 9.x をインストールすれば <code>PATH</code> に入る）',
+    en: 'Put CUDA 12’s <code>cudart64_12.dll</code>, <code>cublas64_12.dll</code>, <code>cublasLt64_12.dll</code> and <code>cufft64_11.dll</code>, plus all of cuDNN 9’s <code>cudnn*64_9.dll</code>, in the engine folder or somewhere on <code>PATH</code> (installing CUDA Toolkit 12.x and cuDNN 9.x from NVIDIA adds them to <code>PATH</code>)',
+  },
+  cuda_step3: {
+    ja: 'エンジンを立て直し（検討を止めて始め直すなど）、USI ログに「推論: CUDA」と出れば完了',
+    en: 'Restart the engine (for example, stop and restart the analysis); when the USI log says “Inference: CUDA”, you are done',
+  },
+  cuda_tested: {
+    ja: '確かめた組み合わせ: CUDA 12.9（cudart 12.9.79・cuBLAS 12.9.2.10・cuFFT 11.4.1.4）、cuDNN 9.26.0.51',
+    en: 'Tested with CUDA 12.9 (cudart 12.9.79, cuBLAS 12.9.2.10, cuFFT 11.4.1.4) and cuDNN 9.26.0.51',
+  },
+  cuda_reopen_hint: {
+    ja: 'この案内は「エンジン」の一覧からいつでも開けます（そのエンジンをこの起動のあいだに立てたあと）。',
+    en: 'You can open this again from the Engines list at any time (once that engine has run in this session).',
+  },
+  cuda_later_switch: {
+    ja: '「{name}」は {provider} で読んでいます。CUDA 版に切り替えると速くなります（手順は対局か棋譜解析が止まったら出します）',
+    en: '“{name}” is running on {provider}; the CUDA build would be faster (the steps will appear once the game or kifu analysis stops)',
+  },
+  cuda_later_fallback: {
+    ja: '「{name}」は DLL が足りず CUDA を使えないので {provider} で読んでいます（詳しくは対局か棋譜解析が止まったら出します）',
+    en: '“{name}” cannot use CUDA because a DLL is missing, so it is running on {provider} (details will appear once the game or kifu analysis stops)',
+  },
+  cuda_open_ort: { ja: 'ONNX Runtime 1.30.0 の配布ページ', en: 'ONNX Runtime 1.30.0 release page' },
+  cuda_open_dir: { ja: 'エンジンのフォルダを開く', en: 'Open the engine folder' },
+  cuda_dismiss: { ja: '今後表示しない', en: 'Don’t show again' },
 
   // ---- 内蔵の布石評価 ----
   bi_name: { ja: '内蔵の布石評価', en: 'Built-in placement evaluator' },
@@ -532,6 +582,9 @@ const DICT = {
   en_opt_batch: { ja: 'バッチ', en: 'Batch' },
   en_noname: { ja: '(名前なし)', en: '(no name)' },
   en_scale_meta: { ja: '勝率の目盛り {scale} / {offset}', en: 'Win-rate scale {scale} / {offset}' },
+  en_provider_meta: { ja: '推論 {provider}', en: 'Inference {provider}' },
+  en_cuda_switch: { ja: 'CUDA 版への切り替え', en: 'Switch to CUDA' },
+  en_cuda_fallback: { ja: 'CUDA が使えない理由', en: 'Why CUDA failed' },
   en_edit: { ja: '設定', en: 'Settings' },
   en_dup: { ja: '複製', en: 'Duplicate' },
   en_dup_suffix: { ja: '{name}（複製）', en: '{name} (copy)' },

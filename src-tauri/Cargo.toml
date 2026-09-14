@@ -31,6 +31,10 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # 取ってきた書庫の中身の照合（配布元の貼り替えに気づくため）
 sha2 = "0.10"
 
+# PC の GPU を DXGI で数える（NVIDIA なら CUDA 版への切り替えを案内する）。tauri と同じ版
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Graphics_Dxgi"] }
+
 # 自動更新はデスクトップだけ（モバイルには入れない）
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"

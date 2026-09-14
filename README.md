@@ -141,6 +141,18 @@ TensorRT 7.2.3.4 を別に入れる必要があるので、自動では登録し
 模型（`.onnx`）と実行に要る DLL は配布元の説明どおりに揃えてください。
 足りないと、エンジンは何も言わずに終了します。そのときは「USI ログ」に終了コードが出ます。
 
+#### 推論の速さ（CUDA / DirectML / CPU）
+
+エンジンが準備（`isready`）のときに `info string … provider cuda|dml|cpu` を出すと（天秤将棋の拡張エンジン Libra が出します）、
+何で読んでいるかを「USI ログ」に「推論: DirectML」のように出し、「エンジン」の一覧にも添えます。
+
+Libra の配布物は DirectML 版です。**NVIDIA の GPU の PC で DirectML か CPU のまま読んでいると、
+CUDA 版への切り替えの手順を 1 度だけ案内します**（「今後表示しない」で止められます）。
+CUDA 版は RTX 5070 Ti の実測で DirectML の約 4 倍速いですが、CUDA 12 と cuDNN 9 の DLL（計 2GB 前後）を
+NVIDIA から入れる必要があり、このアプリにもエンジンにも入っていません。
+切り替えようとして DLL が足りなかったとき（エンジンは止まらずに CPU などで読み続けます）は、
+足りない DLL の名前が入ったエラー文と置き場所を案内します。
+
 ## 開発
 
 Tauri v2 + TypeScript（フレームワーク無し）。ルールは wasm（cppshogi）、本将棋は shogiops。

@@ -61,6 +61,8 @@ export interface Settings {
   layout: LayoutSettings;
   /** はじめの案内を見たか（初回だけ自動で出す） */
   seenSetup: boolean;
+  /** NVIDIA の GPU で DirectML・CPU のまま読んでいるときの「CUDA 版に切り替えると速い」を今後出さない */
+  cudaHintDismissed: boolean;
 }
 
 /** 下の欄に置けるもの */
@@ -114,6 +116,7 @@ export function defaultSettings(): Settings {
     kifuAnalysisSec: 2,
     layout: { ...DEFAULT_LAYOUT },
     seenSetup: false,
+    cudaHintDismissed: false,
   };
 }
 
@@ -191,6 +194,7 @@ export function merge(saved: (Partial<Settings> & { winrate?: EvalScale; analysi
     kifuAnalysisSec: typeof saved.kifuAnalysisSec === 'number' && saved.kifuAnalysisSec > 0 ? saved.kifuAnalysisSec : d.kifuAnalysisSec,
     layout: mergeLayout(saved.layout),
     seenSetup: saved.seenSetup === true,
+    cudaHintDismissed: saved.cudaHintDismissed === true,
   };
   if (s.normalEngineId && !engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = undefined;
   // 既定は同梱・足した模型一式・布石対応のエンジンのどれか。消えた先を指したままにしない

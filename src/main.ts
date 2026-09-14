@@ -20,7 +20,8 @@ import { EngineDialog, type ModelSetView } from './ui/engines.ts';
 import { NewGameDialog, type NewGameChoice } from './ui/newgame.ts';
 import { PositionEditor } from './ui/editor.ts';
 import { MatchDriver } from './ui/play.ts';
-import { UsiEngine, isTauri, type Thinker } from './usi/engine.ts';
+import { UsiEngine, isTauri, onProviderReport, type Thinker } from './usi/engine.ts';
+import { CudaGuide, detectNvidia } from './ui/cuda.ts';
 import { BuiltinEvaluator } from './eval/builtin.ts';
 import { dirSource, urlSource } from './eval/source.ts';
 import { parseKif, writeKif, writeNormalOnlyKif } from './kif/tenbin-kif.ts';
@@ -111,6 +112,17 @@ async function main(): Promise<void> {
   const editorEl = $('editor');
   const usiConsole = new UsiConsole(consoleEl);
 
+  // エンジンが推論のプロバイダ（CUDA / DirectML / CPU）を申告したら、CUDA 版への切り替えを案内するか決める。
+  // GPU は先に調べておく（エンジンの一覧を描くときに待たない）
+  const cudaGuide = new CudaGuide($('dialogs'), {
+    settings: () => settings,
+    save: () => saveSettings(settings),
+    busy: () => (driver.active && !driver.isPaused && game.phase !== 'over') || kifuAnalyzer.running,
+    say: (text) => say(text),
+  });
+  void detectNvidia();
+  onProviderReport((cfg, r) => void cudaGuide.consider(cfg, r));
+
   const engineDialog = new EngineDialog($('dialogs'), {
     settings: () => settings,
     save: () => saveSettings(settings),
@@ -124,6 +136,7 @@ async function main(): Promise<void> {
       add: (dir) => addModelSet(dir),
       remove: (id) => removeModelSet(id),
     },
+    openCudaGuide: (cfg, report, advice) => cudaGuide.open(cfg, report, advice),
   });
   const newGameDialog = new NewGameDialog($('dialogs'), () => settings);
   const setupDialog = new SetupDialog($('dialogs'), {
@@ -299,6 +312,7 @@ async function main(): Promise<void> {
     const t0 = performance.now();
     const n = await kifuAnalyzer.run({ fromIndex, secPerMove: o.secPerMove });
     if (n > 0) say(t('msg_kifu_analysis_done', { n, sec: ((performance.now() - t0) / 1000).toFixed(0) }));
+    cudaGuide.flush();
   }
   usiConsole.onSend = (line) => analysis.sendRaw(line);
 
@@ -686,6 +700,8 @@ async function main(): Promise<void> {
     kifu.render(game.moves, cursor, cursor === null ? undefined : t('kifu_viewing', { n: v.ply }));
     paintSide(v);
     paintPlaySides();
+    // 対局が止まった・終わったら、手番の合間に出さずにおいた CUDA の案内を開く
+    cudaGuide.flush();
     paintGraph(null);
     paintToolbar();
     kifu.revealCurrent();

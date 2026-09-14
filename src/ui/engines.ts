@@ -4,11 +4,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { t } from '../i18n.ts';
-import { COMMON_OPTIONS, GPU_READY_SEC, READY_SEC, SUMMARY_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, usesGpu, type EngineConfig, type EngineKind } from '../usi/engine.ts';
+import { COMMON_OPTIONS, GPU_READY_SEC, READY_SEC, SUMMARY_OPTIONS, UsiEngine, isTauri, newEngineConfig, optionValue, providerOf, usesGpu, type EngineConfig, type EngineKind } from '../usi/engine.ts';
 import { EVAL_PRESETS, evalFromDeclaration, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
+import { PROVIDER_LABELS, cudaAdvice, type CudaAdvice, type ProviderReport } from '../usi/provider.ts';
 import { BUILTIN_ID, type Settings } from '../settings.ts';
 import type { Key } from '../i18n.ts';
+import { knownNvidia } from './cuda.ts';
 
 /** 一覧の見出しに出す項目の呼び名。表に無い項目は名前をそのまま出す */
 const OPTION_LABELS: Record<string, Key> = {
@@ -50,6 +52,8 @@ export interface EngineDialogDeps {
   openLog(): void;
   /** 布石の模型一式（世代）の付け外し */
   models: ModelSetApi;
+  /** CUDA 版への切り替えの案内を開く（「今後表示しない」にしていても開く） */
+  openCudaGuide(cfg: EngineConfig, report: ProviderReport, advice: CudaAdvice): void;
 }
 
 interface FoundExecutable {
@@ -139,6 +143,10 @@ export class EngineDialog {
         const label = OPTION_LABELS[k] ? t(OPTION_LABELS[k]!) : k;
         return `${label} ${esc(k === 'DNN_Model' || k === 'EvalDir' ? basename(v) : v)}${k === 'USI_Hash' ? 'MB' : ''}`;
       }).filter(Boolean).slice(0, 3);
+      // 推論のプロバイダは、この起動のあいだに立てて申告を聞いたエンジンだけ分かる（申告を読むだけでは isready を送らない）
+      const provider = providerOf(e.id);
+      if (provider) opts.unshift(t('en_provider_meta', { provider: PROVIDER_LABELS[provider.provider] }));
+      const advice = provider ? cudaAdvice(provider, knownNvidia() !== null) : null;
       li.innerHTML = `
         <div class="engine-name">${esc(e.name || t('en_noname'))} ${badges.join(' ')}${e.idName ? `<span class="engine-idname">${esc(e.idName)}</span>` : ''}</div>
         <div class="engine-path">${esc(e.path)}${e.args ? ' ' + esc(e.args) : ''}</div>
@@ -147,8 +155,13 @@ export class EngineDialog {
           <button type="button" data-act="edit">${t('en_edit')}</button>
           <button type="button" data-act="dup">${t('en_dup')}</button>
           <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : s.fusekiEngineId === e.id) ? 'disabled' : ''}>${t(e.kind === 'fuseki' ? 'en_make_default_fuseki' : 'en_make_default_normal')}</button>
+          ${advice ? `<button type="button" data-act="cuda">${t(advice === 'fallback' ? 'en_cuda_fallback' : 'en_cuda_switch')}</button>` : ''}
           <button type="button" data-act="remove" class="danger">${t('en_remove')}</button>
         </div>`;
+      li.querySelector('[data-act="cuda"]')?.addEventListener('click', () => {
+        this.dialog.close();
+        this.deps.openCudaGuide(e, provider!, advice!);
+      });
       li.querySelector('[data-act="edit"]')!.addEventListener('click', () => this.paintForm(clone(e)));
       li.querySelector('[data-act="dup"]')!.addEventListener('click', () => {
         const c = clone(e);

@@ -7,8 +7,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { t } from '../i18n.ts';
 import { listen } from '@tauri-apps/api/event';
-import { parseBestmove, parseId, parseInfo, parseOption, type Bestmove, type UsiInfo, type UsiOption } from './parse.ts';
+import { parseBestmove, parseId, parseInfo, parseOption, parseProviderFallback, parseProviderLine, type Bestmove, type InferenceProvider, type ProviderFallback, type ProviderLine, type UsiInfo, type UsiOption } from './parse.ts';
 import { DEFAULT_EVAL, type EvalScale } from './evalscale.ts';
+import { PROVIDER_LABELS, type ProviderReport } from './provider.ts';
 
 export type EngineKind = 'normal' | 'fuseki';
 
@@ -145,6 +146,23 @@ function releaseGpu(e: UsiEngine): void {
   if (gpuHolder === e) gpuHolder = null;
 }
 
+/**
+ * 登録（config.id）ごとの、最後の起動で申告された推論のプロバイダ（CUDA / DirectML / CPU）。
+ * 席ごとに process が分かれても、DLL は登録の実行ファイルのフォルダにあるので 1 つでよい。
+ */
+const providers = new Map<string, ProviderReport>();
+let providerListener: ((cfg: EngineConfig, r: ProviderReport) => void) | null = null;
+
+/** その登録が最後に申告した推論のプロバイダ。この起動のあいだに立てていなければ null */
+export function providerOf(configId: string): ProviderReport | null {
+  return providers.get(configId) ?? null;
+}
+
+/** エンジンが isready で推論のプロバイダを申告したときに呼ばれる（CUDA 版への切り替えの案内に使う） */
+export function onProviderReport(fn: ((cfg: EngineConfig, r: ProviderReport) => void) | null): void {
+  providerListener = fn;
+}
+
 export type EngineState = 'stopped' | 'starting' | 'ready' | 'thinking';
 export type LogDirection = 'in' | 'out' | 'err' | 'sys';
 
@@ -205,6 +223,10 @@ export class UsiEngine implements Thinker {
   private spawned = false;
   /** 止めたのに応答が無かった探索の数。遅れて届く bestmove をその数だけ捨てる */
   private stale = 0;
+  /** isready の間に届いた推論のプロバイダの申告（Libra）。readyok で確定する */
+  private providerLine: ProviderLine | null = null;
+  /** 先に試して使えなかったプロバイダ。provider の行の後に届く */
+  private fallbacks: ProviderFallback[] = [];
   /** プロセスの識別子。同じ登録を2本立てる（対局の先後）ときは別にする */
   readonly processId: string;
   readonly config: EngineConfig;
@@ -240,6 +262,7 @@ export class UsiEngine implements Thinker {
         this.applyOptions();
         this.send('isready');
         await this.waitReady();
+        this.reportProvider();
         this.setState('ready');
       } catch (e) {
         // 既に次の起動が始まっていたら、そちらの process を巻き添えに殺さない
@@ -268,6 +291,22 @@ export class UsiEngine implements Thinker {
     }
   }
 
+  /**
+   * isready の間に申告された推論のプロバイダを覚え、ログに出して知らせる。
+   * 申告しないエンジン（やねうら王・dlshogi など）は何もしない。
+   */
+  private reportProvider(): void {
+    if (!this.providerLine) return;
+    const r: ProviderReport = { ...this.providerLine, fallbacks: this.fallbacks.slice() };
+    providers.set(this.config.id, r);
+    const detail = [r.onnxruntime ? `ONNX Runtime ${r.onnxruntime}` : '', r.model ?? ''].filter(Boolean).join(' · ');
+    this.log('sys', t('eng_provider_log', { provider: PROVIDER_LABELS[r.provider], detail: detail ? ` · ${detail}` : '' }));
+    for (const f of r.fallbacks) {
+      this.log('sys', t('eng_provider_fallback_log', { from: PROVIDER_LABELS[f.from as InferenceProvider] ?? f.from, error: f.error }));
+    }
+    providerListener?.(this.config, r);
+  }
+
   /** 起動の途中経過を伝える。画面に出るのは起動中だけ */
   private status(text: string): void {
     this.onStatus?.(text);
@@ -276,6 +315,8 @@ export class UsiEngine implements Thinker {
   private async spawn(): Promise<void> {
     this.exited = false;
     this.stale = 0;
+    this.providerLine = null;
+    this.fallbacks = [];
     this.spawned = true;
     await ensureListener();
     receivers.set(this.processId, (p) => this.receive(p));
@@ -341,7 +382,13 @@ export class UsiEngine implements Thinker {
     if (id?.author) this.idAuthor = id.author;
     const opt = parseOption(line);
     if (opt) this.options.push(opt);
-    if (this.state === 'starting' && line.startsWith('info string')) this.status(line.slice('info string'.length).trim().slice(0, 120));
+    if (line.startsWith('info string')) {
+      if (this.state === 'starting') this.status(line.slice('info string'.length).trim().slice(0, 120));
+      const provider = parseProviderLine(line);
+      if (provider) this.providerLine = provider;
+      const fallback = parseProviderFallback(line);
+      if (fallback) this.fallbacks.push(fallback);
+    }
     if (line.startsWith('info')) {
       const info = parseInfo(line);
       if (info && (info.scoreCp !== undefined || info.scoreMate !== undefined || info.winrate !== undefined || info.string !== undefined)) {

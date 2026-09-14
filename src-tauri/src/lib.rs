@@ -531,6 +531,50 @@ fn cpu_info() -> serde_json::Value {
     v
 }
 
+/// PC の GPU（DXGI のアダプタ）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GpuAdapter {
+    name: String,
+    /// PCI のベンダー ID（NVIDIA は 0x10DE）
+    vendor_id: u32,
+}
+
+/// PC の GPU の一覧。NVIDIA の GPU があるのに DirectML・CPU で読んでいるエンジンに、
+/// CUDA 版への切り替えを案内するために使う。調べられなければ空（案内を出さないだけ）。
+#[tauri::command(async)]
+fn gpu_adapters() -> Vec<GpuAdapter> {
+    list_gpu_adapters()
+}
+
+/// DXGI で数える。窓を出さず、wmic（新しい Windows から消えつつある）にも頼らない。
+/// ソフトウェアのアダプタ（Microsoft Basic Render Driver）は除く。
+#[cfg(windows)]
+fn list_gpu_adapters() -> Vec<GpuAdapter> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE};
+    let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    // 最後の次で DXGI_ERROR_NOT_FOUND が返る
+    while let Ok(adapter) = unsafe { factory.EnumAdapters1(i) } {
+        i += 1;
+        let Ok(desc) = (unsafe { adapter.GetDesc1() }) else { continue };
+        if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+            continue;
+        }
+        let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+        out.push(GpuAdapter { name: String::from_utf16_lossy(&desc.Description[..len]), vendor_id: desc.VendorId });
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn list_gpu_adapters() -> Vec<GpuAdapter> {
+    Vec::new()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let host = Arc::new(EngineHost::new());
@@ -564,6 +608,7 @@ pub fn run() {
             scan_executables,
             open_path,
             cpu_info,
+            gpu_adapters,
         ])
         .on_window_event(move |window, event| {
             // 窓を閉じたらエンジンを残さない。残すとやねうら王が Threads ぶんの CPU を握り続ける。

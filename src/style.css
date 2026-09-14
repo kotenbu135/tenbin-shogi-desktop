@@ -570,6 +570,11 @@ fieldset.kind { border: 1px solid var(--rule); padding: 8px 12px; display: grid;
 fieldset.kind legend { color: var(--ink-2); padding: 0 4px; }
 fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* CUDA 版への切り替えの案内。エラー文は長い 1 行なので折り返す */
+.cuda-dialog p { margin: 0; }
+.cuda-dialog code { font-size: 12px; color: var(--ink-2); }
+.cuda-steps { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.cuda-error { margin: 0; padding: 8px 10px; border: 1px solid var(--rule); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
 
 /* ---- 矢印と印（検討の候補） ---- */
 .board { position: relative; }

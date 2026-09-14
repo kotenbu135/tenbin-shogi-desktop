@@ -139,6 +139,37 @@ export function parseBestmove(line: string): Bestmove | null {
   return b;
 }
 
+/** 推論に実際に使っている実行プロバイダ（ONNX Runtime の execution provider） */
+export type InferenceProvider = 'cuda' | 'dml' | 'cpu';
+
+/** `info string model <ファイル名> onnxruntime <版> provider cuda|dml|cpu`（Libra が isready で出す） */
+export interface ProviderLine {
+  model?: string;
+  onnxruntime?: string;
+  provider: InferenceProvider;
+}
+
+export function parseProviderLine(line: string): ProviderLine | null {
+  // ファイル名に空白が入っても読めるよう、onnxruntime の前までをファイル名とする
+  const m = /^info\s+string\s+(?:model\s+(.+?)\s+)?(?:onnxruntime\s+(\S+)\s+)?provider\s+(cuda|dml|cpu)\s*$/.exec(line.trim());
+  if (!m) return null;
+  const r: ProviderLine = { provider: m[3] as InferenceProvider };
+  if (m[1]) r.model = m[1];
+  if (m[2]) r.onnxruntime = m[2];
+  return r;
+}
+
+/** `info string provider fallback cuda: <ONNX Runtime のエラー文>`（先に試したプロバイダが失敗して次へ進んだ） */
+export interface ProviderFallback {
+  from: string;
+  error: string;
+}
+
+export function parseProviderFallback(line: string): ProviderFallback | null {
+  const m = /^info\s+string\s+provider\s+fallback\s+(\w+):\s*(.*)$/.exec(line.trim());
+  return m ? { from: m[1]!, error: m[2]! } : null;
+}
+
 /** `id name X` / `id author Y` */
 export function parseId(line: string): { name?: string; author?: string } | null {
   const m = /^id\s+(name|author)\s+(.+)$/.exec(line.trim());
