@@ -1,6 +1,6 @@
 [package]
 name = "tenbin-shogi-gui"
-version = "0.10.1"
+version = "0.10.2"
 description = "天秤将棋のデスクトップGUI（対局・検討）"
 edition.workspace = true
 license.workspace = true
