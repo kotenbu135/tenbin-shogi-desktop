@@ -9,11 +9,15 @@
 //
 // mode='position' は任意の局面（局面編集・KIF の局面図）から本将棋を始める。
 //
+// 本将棋の終局は Libra の docs/rules.md §5（世界コンピュータ将棋選手権の大会ルール）に揃える:
+//   詰み・手が無い → 千日手（4 回目、連続王手は王手側の負け）→ 入玉宣言（27 点法）→ 手数上限（320 手で引き分け）
+// 千日手と手数上限は手を指すたびにここで裁く。宣言は `win` という手として棋譜に残す。
+//
 // 符号は日本将棋連盟の表記に従う（shogiops の日本語表記を使う）。
 //   同　銀 / ５八金左 / 打は盤上の駒が同じマスへ動けるときだけ。布石中は動ける駒が無いので打は付けない。
 
-import { parseSfen } from 'shogiops/sfen';
-import { makeSquareName, parseSquareName, parseUsi } from 'shogiops/util';
+import { makeBoardSfen, makeHandsSfen, parseSfen } from 'shogiops/sfen';
+import { makeSquareName, opposite, parseSquareName, parseUsi } from 'shogiops/util';
 import { handRoles, pieceCanPromote, pieceForcePromote } from 'shogiops/variant/util';
 import { makeJapaneseMoveOrDrop } from 'shogiops/notation/japanese';
 import { makeWesternMoveOrDrop } from 'shogiops/notation/western';
@@ -41,7 +45,7 @@ export interface MoveRecord {
   /** 盤の手数。choose は null */
   ply: number | null;
   color: Color | null;
-  /** "P*7g" / "7g7f" / "choose:sente" / "resign" / "timeout" */
+  /** "P*7g" / "7g7f" / "choose:sente" / "resign" / "timeout" / "win"（入玉宣言） */
   usi: string;
   /** 符号 "７六歩"（先後の記号は付けない。表示側が ☗☖ を添える）。KIF と同じ日本語表記 */
   text: string;
@@ -71,11 +75,33 @@ export type OverReason =
   | { kind: 'resign' | 'timeout'; loser: Color }
   | { kind: 'ruling41' }
   | { kind: 'mate' }
+  /** 同じ局面の 4 回目。引き分け */
+  | { kind: 'sennichite' }
+  /** 連続王手の千日手。王手をかけ続けた側の負け */
+  | { kind: 'perpetual_check'; loser: Color }
+  /** 入玉宣言。条件を満たせば宣言した側の勝ち、欠ければ負け */
+  | { kind: 'declaration' | 'illegal_declaration'; declarer: Color }
+  /** 本将棋の手数上限（MAX_NORMAL_MOVES）に達した。引き分け */
+  | { kind: 'max_moves' }
   | { kind: 'other'; result: string };
 
 export interface GameOver {
   winner: Color | null;
   reason: OverReason;
+}
+
+/**
+ * 本将棋の手数上限。大会ルール第 27 条 3 項の 320 手で、41 手目を 1 手目として数える
+ * （Libra の docs/rules.md §5.4、2026-09-11 のルール設計者の決定。任意局面からは開始局面から数える）
+ */
+export const MAX_NORMAL_MOVES = 320;
+
+/** 千日手になる同じ局面の回数 */
+const REPETITION_COUNT = 4;
+
+/** 対局を終える手のトークン。盤を動かさない */
+export function isEndToken(usi: string): boolean {
+  return usi === 'resign' || usi === 'timeout' || usi === 'win';
 }
 
 /** 終局の理由を画面の言葉にする */
@@ -89,9 +115,56 @@ export function overReasonText(r: OverReason): string {
       return t('over_ruling41');
     case 'mate':
       return t('over_mate');
+    case 'sennichite':
+      return t('over_sennichite');
+    case 'perpetual_check':
+      return t('over_perpetual_check', { side: sideName(r.loser) });
+    case 'declaration':
+      return t('over_declaration', { side: sideName(r.declarer) });
+    case 'illegal_declaration':
+      return t('over_illegal_declaration', { side: sideName(r.declarer) });
+    case 'max_moves':
+      return t('over_max_moves', { n: MAX_NORMAL_MOVES });
     default:
       return r.result || t('over_other');
   }
+}
+
+/** 千日手を数えるための局面の鍵。盤・持ち駒・手番だけで、手数は入れない */
+function repetitionKey(pos: Shogi): string {
+  return `${makeBoardSfen('standard', pos.board)} ${pos.turn} ${makeHandsSfen('standard', pos.hands)}`;
+}
+
+const BIG_ROLES = new Set<OpsRole>(['rook', 'bishop', 'dragon', 'horse']);
+
+/** 敵陣三段目以内か。先手には 1〜3 段目（a〜c）、後手には 7〜9 段目（g〜i） */
+function inEnemyCamp(color: Color, sq: Square): boolean {
+  const rank = makeSquareName(sq).slice(-1);
+  return color === 'sente' ? rank <= 'c' : rank >= 'g';
+}
+
+/**
+ * 手番の側が入玉宣言で勝てるか（大会ルール第 25 条、Libra の docs/rules.md §5.3 の 27 点法）。
+ * 玉が敵陣三段目以内・王手されていない・敵陣の自駒（玉を除く）が 10 枚以上・
+ * 持ち駒と敵陣の自駒の点（大駒 5 点、他 1 点）が先手 28 点以上／後手 27 点以上。
+ * 持ち時間が残っていることは時計の側が受け持つ（切れていれば先に時間切れで終わる）。
+ */
+export function canDeclareWin(pos: Shogi): boolean {
+  const color = pos.turn;
+  const king = pos.board.pieces(color, 'king').first();
+  if (king === undefined || !inEnemyCamp(color, king)) return false;
+  if (pos.isCheck()) return false;
+  let pieces = 0;
+  let points = 0;
+  for (const sq of pos.board.color(color)) {
+    const p = pos.board.get(sq);
+    if (!p || p.role === 'king' || !inEnemyCamp(color, sq)) continue;
+    pieces++;
+    points += BIG_ROLES.has(p.role) ? 5 : 1;
+  }
+  const hand = pos.hands.color(color);
+  for (const role of handRoles('standard')) points += hand.get(role) * (BIG_ROLES.has(role) ? 5 : 1);
+  return pieces >= 10 && points >= (color === 'sente' ? 28 : 27);
 }
 
 /** 棋譜のある地点の局面。過去の局面を見る・検討するときに使う。 */
@@ -181,6 +254,10 @@ export class Game {
   private chosen: Color | null = null;
   /** 本将棋の手数の土台。布石からなら 40、任意局面からなら 0 */
   private readonly basePly: number;
+  /** 本将棋の局面の鍵。[0] は開始局面（41 手目の局面を 1 回目として数える。docs/rules.md §4）、[i] は i 手指した後 */
+  private readonly positionKeys: string[] = [];
+  /** 本将棋の i 手目（0 始まり）が王手だったか。連続王手の千日手を見分ける */
+  private readonly checks: boolean[] = [];
   over: GameOver | null = null;
 
   private readonly fuseki: Fuseki;
@@ -200,6 +277,7 @@ export class Game {
       if (r.isErr) throw new Error(t('err_read_position', { msg: r.error.message }));
       this.pos = r.value;
       this.startSfen = sfen;
+      this.positionKeys.push(repetitionKey(this.pos));
     }
   }
 
@@ -312,6 +390,7 @@ export class Game {
     let rec: MoveRecord;
     if (token.startsWith('choose:')) rec = this.applyChoose(token);
     else if (token === 'resign' || token === 'timeout') rec = this.applyEnd(token, loser);
+    else if (token === 'win') rec = this.applyDeclare();
     else if (this.pos) rec = this.applyNormal(token);
     else rec = this.applyDrop(token);
     if (time) rec.time = time;
@@ -355,6 +434,28 @@ export class Game {
     });
   }
 
+  /**
+   * 入玉宣言（`bestmove win`、または人の「入玉宣言」）。本将棋の手番の側だけが宣言でき、
+   * 条件を満たせば勝ち、1 つでも欠ければ負け（docs/rules.md §5.3。合意の持将棋は採らない）。
+   */
+  private applyDeclare(): MoveRecord {
+    const pos = this.pos;
+    if (!pos) throw new Error(t('err_declare_not_normal'));
+    const declarer = pos.turn;
+    const ok = canDeclareWin(pos);
+    this.over = ok
+      ? { winner: declarer, reason: { kind: 'declaration', declarer } }
+      : { winner: opposite(declarer), reason: { kind: 'illegal_declaration', declarer } };
+    return this.push({
+      ply: this.nextPly,
+      color: declarer,
+      usi: 'win',
+      text: '入玉宣言',
+      textEn: 'Declares win',
+      phase: 'normal',
+    });
+  }
+
   private applyDrop(token: string): MoveRecord {
     const phase = this.phase;
     if (phase === 'choose') throw new Error(t('err_choose_first'));
@@ -390,11 +491,14 @@ export class Game {
     const r = parseSfen('standard', sfen, false);
     if (r.isErr) throw new Error(t('err_read_41', { msg: r.error.message }));
     this.pos = r.value;
+    this.positionKeys.push(repetitionKey(this.pos));
   }
 
   /** その手を今の局面に指せるか（エンジンの返した手を当てる前の確認） */
   canApply(token: string): boolean {
     if (token === 'resign' || token === 'timeout' || token.startsWith('choose:')) return true;
+    // 宣言は条件を欠いても受ける（欠けていれば宣言した側の負け）。布石中は宣言そのものが無い
+    if (token === 'win') return !!this.pos && !this.over;
     if (this.pos) {
       const md = parseUsi(token);
       return !!md && this.pos.isLegal(md);
@@ -420,12 +524,50 @@ export class Game {
     this.lastSquare = makeSquareName(md.to);
     pos.play(md);
     this.normalMoves.push(token);
+    this.positionKeys.push(repetitionKey(pos));
+    this.checks.push(pos.isCheck());
     const rec = this.push({ ply, color, usi: token, text, textEn, phase: 'normal' });
+    // 裁く順は docs/rules.md §5.1: 手が無い（詰み）→ 千日手 → 手数上限
     if (pos.isEnd()) {
       const o = pos.outcome();
       this.over = { winner: o?.winner ?? null, reason: o?.result === 'checkmate' ? { kind: 'mate' } : { kind: 'other', result: o?.result ?? '' } };
+    } else {
+      this.over = this.repetitionOver() ?? (this.normalMoves.length >= MAX_NORMAL_MOVES ? { winner: null, reason: { kind: 'max_moves' } } : null);
     }
     return rec;
+  }
+
+  /**
+   * いま指した手で同じ局面が 4 回目になったら千日手。1 回目から 4 回目までの間、一方の手が
+   * すべて王手なら、その側の負け（連続王手の千日手）。両方ともすべて王手なら引き分け（docs/rules.md §5.2）。
+   */
+  private repetitionOver(): GameOver | null {
+    const keys = this.positionKeys;
+    const last = keys.length - 1;
+    const key = keys[last]!;
+    let count = 0;
+    let first = last;
+    for (let i = last; i >= 0; i--) {
+      if (keys[i] !== key) continue;
+      count++;
+      first = i;
+    }
+    if (count < REPETITION_COUNT) return null;
+    // 局面 first から last までに指された手は first..last-1。最後の手を指した側と、その相手に分ける
+    const lastMover = this.pos!.turn === 'sente' ? 'gote' : 'sente';
+    let moverAllChecks = true;
+    let otherAllChecks = true;
+    for (let m = first; m < last; m++) {
+      const byMover = (last - 1 - m) % 2 === 0;
+      if (this.checks[m]) continue;
+      if (byMover) moverAllChecks = false;
+      else otherAllChecks = false;
+    }
+    if (moverAllChecks !== otherAllChecks) {
+      const loser: Color = moverAllChecks ? lastMover : opposite(lastMover);
+      return { winner: opposite(loser), reason: { kind: 'perpetual_check', loser } };
+    }
+    return { winner: null, reason: { kind: 'sennichite' } };
   }
 
   /** 読み筋（USI）を符号の列にする。本将棋は局面を進めながら、布石は駒打ちとして読む。画面の言語に合わせる。 */
@@ -445,7 +587,7 @@ export class Game {
       return out;
     }
     // 共有の wasm は最新の対局へ戻されていることがある（過去の局面の読み筋）ので、手番は自分の記録から数える
-    const played = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout').length;
+    const played = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && !isEndToken(m.usi)).length;
     let turn: Color = played % 2 === 0 ? 'sente' : 'gote';
     for (const u of usis) {
       if (u.length < 4 || u[1] !== '*') break;
@@ -496,7 +638,7 @@ export class Game {
     const p = start.clone();
     let last: Square | undefined;
     for (const rec of this.moves) {
-      if (rec.phase !== 'normal' || rec.usi === 'resign' || rec.usi === 'timeout') continue;
+      if (rec.phase !== 'normal' || isEndToken(rec.usi)) continue;
       const md = parseUsi(rec.usi);
       if (!md) break;
       yield { record: rec, pos: p.clone(), md, lastDest: last };
@@ -510,7 +652,7 @@ export class Game {
     if (this.startSfen && (this.pos || this.over)) {
       return `position sfen ${this.startSfen}` + (this.normalMoves.length ? ` moves ${this.normalMoves.join(' ')}` : '');
     }
-    const drops = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout').map((m) => m.usi);
+    const drops = this.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && !isEndToken(m.usi)).map((m) => m.usi);
     return 'position fuseki' + (drops.length ? ` moves ${drops.join(' ')}` : '');
   }
 
@@ -577,7 +719,7 @@ export class Game {
     this.fuseki.reset(this.fusekiRules);
     if (this.mode === 'position') return;
     for (const m of this.moves) {
-      if (m.phase === 'normal' || m.ply === null || m.usi === 'resign' || m.usi === 'timeout') continue;
+      if (m.phase === 'normal' || m.ply === null || isEndToken(m.usi)) continue;
       const d = this.fuseki.legalDrops().find((x) => x.usi === m.usi);
       if (!d) throw new Error(t('err_rewind', { usi: m.usi }));
       this.fuseki.drop(d);

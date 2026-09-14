@@ -600,7 +600,8 @@ export class AnalysisPanel {
   /** 登録が変わったら呼ぶ */
   refreshEngineList(): void {
     const st = this.deps.settings();
-    const hasNormal = st.engines.some((e) => e.kind === 'normal');
+    // 「布石にも対応」のエンジンも本将棋を読める
+    const hasNormal = st.engines.length > 0;
     this.notice.hidden = hasNormal;
     if (!hasNormal) {
       this.notice.replaceChildren();

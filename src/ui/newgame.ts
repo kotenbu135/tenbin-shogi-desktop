@@ -75,7 +75,9 @@ export class NewGameDialog {
   open(): Promise<NewGameChoice | null> {
     const l = this.last;
     const s = this.settings();
-    const normals = s.engines.filter((e) => e.kind === 'normal');
+    // 本将棋は「布石にも対応」のエンジン（Libra など）も指せる。1 回の登録で 1 手目から終局まで任せられるように
+    // 両方を並べる（本将棋専用を先に）。布石と同じエンジンを選べば、同じ 1 本のプロセスが続けて指す
+    const normals = [...s.engines.filter((e) => e.kind === 'normal'), ...s.engines.filter((e) => e.kind === 'fuseki')];
     const fusekis = s.engines.filter((e) => e.kind === 'fuseki');
     const mainMin = l.timeControl ? Math.round(l.timeControl.mainSec / 60) : 0;
     const byo = l.timeControl?.byoyomiSec ?? 0;

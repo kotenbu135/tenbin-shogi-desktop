@@ -9,7 +9,7 @@
 import type { Game, Color } from '../state/game.ts';
 import type { Clock } from '../state/clock.ts';
 import type { EngineConfig, Thinker } from '../usi/engine.ts';
-import type { UsiInfo } from '../usi/parse.ts';
+import { winrateOfInfo, type UsiInfo } from '../usi/parse.ts';
 import { BuiltinEvaluator } from '../eval/builtin.ts';
 import { isBuiltinId } from '../settings.ts';
 import { t } from '../i18n.ts';
@@ -357,9 +357,14 @@ export class MatchDriver {
     th.setOption('MultiPV', Math.max(1, Math.round(this.deps.multiPv())));
   }
 
-  private goArgs(spec: Extract<PlayerSpec, { type: 'engine' }>): string {
+  private goArgs(spec: Extract<PlayerSpec, { type: 'engine' }>, choosing = false): string {
     const c = this.deps.clock();
     if (c.enabled && c.control) {
+      // 先後の選択は盤の手番（先手）として読ませるが、減るのは選ぶ側の時計（後手の枠）。その残りを両方に渡す
+      if (choosing) {
+        const ms = c.remainingMs(this.deps.game().actingColor);
+        return `btime ${ms} wtime ${ms} byoyomi ${c.control.byoyomiSec * 1000}`;
+      }
       return `btime ${c.remainingMs('sente')} wtime ${c.remainingMs('gote')} byoyomi ${c.control.byoyomiSec * 1000}`;
     }
     return `movetime ${spec.secPerMove * 1000}`;
@@ -374,12 +379,12 @@ export class MatchDriver {
       const th = this.thinker(seat, spec.normalId);
       await this.ensureStarted(th);
       this.sendMultiPv(th);
+      // 入玉宣言はこのアプリが条件を確かめて裁くので、宣言できるエンジンには宣言させる。
+      // 利用者がエンジンの設定で決めていれば、そちらに従う
+      if (th.hasOption('Declare_Win') && th.config.options['Declare_Win'] === undefined) th.setOption('Declare_Win', 'true');
       const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
       if (bm.move === 'resign') return 'resign';
-      if (bm.move === 'win') {
-        this.deps.say(t('pl_declare_win', { name: th.config.name }), true);
-        return 'resign';
-      }
+      if (bm.move === 'win') this.deps.say(t('pl_declare_win', { name: th.config.name }));
       return bm.move;
     }
     // 布石（両玉・選択・駒打ち）
@@ -387,9 +392,28 @@ export class MatchDriver {
     const tokens = g.tokens().filter((t) => !t.startsWith('choose:'));
     const tenbin = g.mode === 'tenbin';
     const lv = LEVELS.find((l) => l.level === spec.level) ?? LEVELS[3]!;
+    // 外の布石エンジンの席。Fuseki_Mode を名乗るもの（Libra など）には天秤将棋の両玉と先後の選択も任せる。
+    // 名乗らないエンジンは 1〜2 手目に玉を置く決まりを知らないので、そこだけ内蔵の両玉の表に落とす（従来どおり）
+    if (!isBuiltinId(spec.fusekiId)) {
+      const th = this.thinker(seat, spec.fusekiId);
+      await this.ensureStarted(th);
+      const knowsMode = th.hasOption('Fuseki_Mode');
+      if (phase === 'fuseki' || knowsMode) {
+        this.sendMultiPv(th);
+        // 布石は天秤将棋と布石将棋で最初の 2 手の意味が違う。position 行からは区別できないので渡す
+        if (knowsMode) th.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
+        // ルールの版は position より先に送る（外のエンジンは次の position の盤から版を効かせる）
+        if (th.hasOption('Fuseki_Rules')) th.setOption('Fuseki_Rules', g.rules);
+        if (phase !== 'choose') {
+          const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
+          return bm.move === 'resign' ? 'resign' : bm.move;
+        }
+        const chosen = await this.engineChoose(seat, th, spec, color);
+        if (chosen) return chosen;
+      }
+    }
     // 席が内蔵（同梱か、足した世代）ならその一式で考える。席ごとに別の世代を置けるので、
-    // 世代どうしを戦わせられる。外のエンジンの席でも両玉と先後の選択は表が要るので、
-    // そこだけ既定の一式に落とす（従来どおり）
+    // 世代どうしを戦わせられる。外のエンジンに任せられなかった両玉と先後の選択は既定の一式に落とす
     const mine = isBuiltinId(spec.fusekiId) ? this.builtinAt(seat, spec.fusekiId) : null;
     const builtin = mine ?? this.deps.builtin();
     if (phase === 'choose') {
@@ -414,15 +438,31 @@ export class MatchDriver {
       }
       return builtin.pickMove(tokens, { temperature: lv.temperature, search: lv.search, tenbin, rules: g.rules });
     }
-    if (isBuiltinId(spec.fusekiId)) throw new Error(t('pl_builtin_missing'));
-    const th = this.thinker(seat, spec.fusekiId);
-    await this.ensureStarted(th);
-    this.sendMultiPv(th);
-    // 布石は天秤将棋と布石将棋で最初の 2 手の意味が違う。position 行からは区別できないので渡す
-    if (th.hasOption('Fuseki_Mode')) th.setOption('Fuseki_Mode', tenbin ? 'tenbin' : 'fuseki');
-    // ルールの版は position より先に送る（外のエンジンは次の position の盤から版を効かせる）
-    if (th.hasOption('Fuseki_Rules')) th.setOption('Fuseki_Rules', g.rules);
-    const bm = await th.go(g.positionCommand(), this.goArgs(spec), this.beginThinking(seat, color, th.config));
-    return bm.move === 'resign' ? 'resign' : bm.move;
+    // 外のエンジンの布石は上で返している。ここに来るのは内蔵の一式が載っていない席だけ
+    throw new Error(t('pl_builtin_missing'));
+  }
+
+  /**
+   * 天秤将棋の先後の選択を外の布石エンジンに決めさせる。両玉を置いた局面（手番は先手）を読ませ、
+   * 最善の候補の勝率（＝先手の勝率）が 0.5 以上なら先手を持つ（Libra の docs/protocol.md §2 のハーネスと同じ）。
+   * 返った bestmove は 3 手目の候補なので指さない。評価が 1 行も来なければ null（内蔵の表に落とす）
+   */
+  private async engineChoose(
+    seat: 0 | 1,
+    th: Thinker,
+    spec: Extract<PlayerSpec, { type: 'engine' }>,
+    color: Color,
+  ): Promise<string | null> {
+    const g = this.deps.game();
+    const show = this.beginThinking(seat, color, th.config);
+    const best = { p: null as number | null };
+    await th.go(g.positionCommand(), this.goArgs(spec, true), (info) => {
+      show(info);
+      if ((info.multipv ?? 1) !== 1) return;
+      const p = winrateOfInfo(info, th.config.eval.scale, th.config.eval.offsetCp);
+      if (p !== null) best.p = p;
+    });
+    if (best.p === null) return null;
+    return `choose:${best.p >= 0.5 ? 'sente' : 'gote'}`;
   }
 }

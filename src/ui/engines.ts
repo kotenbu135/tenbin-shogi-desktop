@@ -8,7 +8,7 @@ import { COMMON_OPTIONS, GPU_READY_SEC, READY_SEC, SUMMARY_OPTIONS, UsiEngine, i
 import { EVAL_PRESETS, evalFromDeclaration, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
 import { PROVIDER_LABELS, cudaAdvice, type CudaAdvice, type ProviderReport } from '../usi/provider.ts';
-import { BUILTIN_ID, type Settings } from '../settings.ts';
+import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
 import type { Key } from '../i18n.ts';
 import { knownNvidia } from './cuda.ts';
 
@@ -126,13 +126,14 @@ export class EngineDialog {
       li.textContent = t('en_empty');
       ul.appendChild(li);
     }
-    const normalDefault = s.engines.find((e) => e.id === s.normalEngineId && e.kind === 'normal') ?? s.engines.find((e) => e.kind === 'normal');
+    // 「布石にも対応」のエンジンも本将棋の既定にできる（Libra を 1 本登録すれば最後まで指せる）
+    const normalDefault = normalEngine(s);
     for (const e of s.engines) {
       const li = document.createElement('li');
       li.className = 'engine-item';
       const badges: string[] = [];
       badges.push(`<span class="engine-kind">${t(e.kind === 'fuseki' ? 'en_kind_fuseki' : 'en_kind_normal')}</span>`);
-      if (e.kind === 'normal' && normalDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_normal')}</span>`);
+      if (normalDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_normal')}</span>`);
       if (e.kind === 'fuseki' && s.fusekiEngineId === e.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
       if (e.gpu) badges.push(`<span class="engine-gpu">${t('en_gpu_badge')}</span>`);
       // 出す項目はエンジンによって違う（NNUE は Threads/USI_Hash、GPU のものは UCT_Threads/DNN_Model）。
@@ -155,6 +156,7 @@ export class EngineDialog {
           <button type="button" data-act="edit">${t('en_edit')}</button>
           <button type="button" data-act="dup">${t('en_dup')}</button>
           <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : s.fusekiEngineId === e.id) ? 'disabled' : ''}>${t(e.kind === 'fuseki' ? 'en_make_default_fuseki' : 'en_make_default_normal')}</button>
+          ${e.kind === 'fuseki' ? `<button type="button" data-act="default-normal" ${normalDefault?.id === e.id ? 'disabled' : ''}>${t('en_make_default_normal')}</button>` : ''}
           ${advice ? `<button type="button" data-act="cuda">${t(advice === 'fallback' ? 'en_cuda_fallback' : 'en_cuda_switch')}</button>` : ''}
           <button type="button" data-act="remove" class="danger">${t('en_remove')}</button>
         </div>`;
@@ -172,6 +174,10 @@ export class EngineDialog {
       li.querySelector('[data-act="default"]')!.addEventListener('click', () => {
         if (e.kind === 'fuseki') s.fusekiEngineId = e.id;
         else s.normalEngineId = e.id;
+        void this.persist();
+      });
+      li.querySelector('[data-act="default-normal"]')?.addEventListener('click', () => {
+        s.normalEngineId = e.id;
         void this.persist();
       });
       li.querySelector('[data-act="remove"]')!.addEventListener('click', () => {
@@ -289,7 +295,7 @@ export class EngineDialog {
     if (i >= 0) cfg.id = s.engines[i]!.id;
     if (i >= 0) s.engines[i] = cfg;
     else s.engines.push(cfg);
-    const hasDefault = s.engines.some((e) => e.id === s.normalEngineId && e.kind === 'normal');
+    const hasDefault = s.engines.some((e) => e.id === s.normalEngineId);
     if (spec.makeDefault === 'always' || !hasDefault) s.normalEngineId = cfg.id;
     await this.persist();
     return err;
@@ -550,7 +556,7 @@ export class EngineDialog {
     const i = s.engines.findIndex((e) => e.id === cfg.id);
     if (i >= 0) s.engines[i] = cfg;
     else s.engines.push(cfg);
-    if (cfg.kind === 'normal' && !s.engines.some((e) => e.id === s.normalEngineId && e.kind === 'normal')) s.normalEngineId = cfg.id;
+    if (cfg.kind === 'normal' && !s.engines.some((e) => e.id === s.normalEngineId)) s.normalEngineId = cfg.id;
     await this.persist();
   }
 }

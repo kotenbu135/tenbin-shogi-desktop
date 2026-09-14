@@ -188,6 +188,17 @@ export function cpToWinrate(cp: number, scale = 435, offsetCp = 34): number {
   return 1 / (1 + Math.exp(-(cp - offsetCp) / scale));
 }
 
+/**
+ * info 1 行から手番側の勝率を読む。詰みの符号 ＞ `winrate` ＞ `score cp` を目盛りで換算、の順
+ * （検討の evalOfInfo と同じ）。評価の無い行（`info string` だけなど）は null
+ */
+export function winrateOfInfo(info: UsiInfo, scale: number, offsetCp: number): number | null {
+  if (info.scoreMate !== undefined) return info.scoreMate > 0 ? 1 : 0;
+  if (info.winrate !== undefined) return info.winrate;
+  if (info.scoreCp !== undefined) return cpToWinrate(info.scoreCp, scale, offsetCp);
+  return null;
+}
+
 /** 勝率 → 擬似 cp（cpToWinrate の逆） */
 export function winrateToCp(p: number, scale = 435, offsetCp = 34): number {
   const q = Math.min(Math.max(p, 1e-6), 1 - 1e-6);

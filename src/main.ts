@@ -736,6 +736,9 @@ async function main(): Promise<void> {
   }
 
   function paintToolbar(): void {
+    const declare = document.querySelector<HTMLButtonElement>('[data-act="declare"]');
+    // 宣言は本将棋の最新局面でだけ。過去の局面を見ている間は押せても何もしないので、押せなくしておく
+    if (declare) declare.disabled = game.phase !== 'normal' || cursor !== null || !!editor;
     const b = document.querySelector<HTMLButtonElement>('[data-act="pause"]');
     if (!b) return;
     const on = driver.isPaused;
@@ -947,6 +950,7 @@ async function main(): Promise<void> {
       <button type="button" data-act="new" title="${t('tb_new_title')}">${ICON.play}<span>${t('tb_new')}</span></button>
       <button type="button" data-act="undo" title="${t('tb_undo_title')}">${ICON.undo}<span>${t('tb_undo')}</span></button>
       <button type="button" data-act="resign" title="${t('tb_resign_title')}">${ICON.flag}<span>${t('tb_resign')}</span></button>
+      <button type="button" data-act="declare" title="${t('tb_declare_title')}">${ICON.crown}<span>${t('tb_declare')}</span></button>
       <button type="button" data-act="pause" aria-pressed="false" title="${t('tb_pause_title')}">${ICON.pause}<span>${t('tb_pause')}</span></button>
       <button type="button" data-act="flip" title="${t('tb_flip_title')}">${ICON.flip}<span>${t('tb_flip')}</span></button>
       <button type="button" data-act="edit" title="${t('tb_edit')}">${ICON.edit}<span>${t('tb_edit')}</span></button>
@@ -998,6 +1002,17 @@ async function main(): Promise<void> {
           break;
         }
         if (confirm(t('confirm_resign', { side: sideName(loser) }))) tryApply('resign', loser);
+        break;
+      }
+      case 'declare': {
+        if (cursor !== null || editor || game.phase !== 'normal') break;
+        // 宣言できるのは手番の側だけ（大会ルール第 25 条）。エンジンの手番に人が代わりに宣言することはできない
+        const seat = driver.seatToMove();
+        if (driver.playing && (seat === null || !driver.humanAt(seat))) {
+          alert(t('alert_declare_not_your_turn'));
+          break;
+        }
+        if (confirm(t('confirm_declare', { side: sideName(game.turn) }))) tryApply('win');
         break;
       }
       case 'flip':
@@ -1233,6 +1248,7 @@ const ICON = {
   pause: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z"/></svg>',
   undo: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M8 5 4 9l4 4M4 9h8a4 4 0 0 1 0 8h-2"/></svg>',
   flag: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M5 17V3.5M5 4h10l-2.5 3.5L15 11H5"/></svg>',
+  crown: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 15.5h12M4.5 13 3 6l4 3 3-5 3 5 4-3-1.5 7z"/></svg>',
   flip: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M4 7.5h11l-3-3M16 12.5H5l3 3"/></svg>',
   edit: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M3.5 3.5h13v13h-13zM3.5 8h13M3.5 12h13M8 3.5v13M12 3.5v13"/><path d="M13.5 13.5l3 3" /></svg>',
   open: '<svg viewBox="0 0 20 20" aria-hidden="true" class="stroke"><path d="M3 5.5h5l1.5 2H17v9H3z"/></svg>',

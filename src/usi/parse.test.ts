@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseInfo, parseOption, parseBestmove, parseId, cpToWinrate, winrateToCp } from './parse.ts';
+import { parseInfo, parseOption, parseBestmove, parseId, cpToWinrate, winrateToCp, winrateOfInfo } from './parse.ts';
+
+test('winrateOfInfo: 詰み ＞ winrate ＞ score cp の順に手番側の勝率を読む（先後の選択に使う）', () => {
+  assert.equal(winrateOfInfo({ scoreMate: 3, winrate: 0.2 }, 600, 0), 1);
+  assert.equal(winrateOfInfo({ scoreMate: -1 }, 600, 0), 0);
+  assert.equal(winrateOfInfo({ winrate: 0.61, scoreCp: -500 }, 600, 0), 0.61);
+  assert.equal(winrateOfInfo({ scoreCp: 34 }, 435, 34), 0.5);
+  assert.equal(winrateOfInfo({ string: 'phase fuseki ply 2 method mcgs' }, 435, 34), null);
+});
 
 test('info: やねうら王の典型', () => {
   const i = parseInfo('info depth 12 seldepth 18 score cp 156 nodes 123456 nps 987654 time 125 multipv 1 pv P*5h 4g5g 5h5g 8b8f');

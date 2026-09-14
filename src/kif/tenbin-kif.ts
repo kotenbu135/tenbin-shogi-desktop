@@ -16,7 +16,7 @@ import { makeUsi, parseSquareName } from 'shogiops/util';
 import { makeKifHeader, makeKifMoveOrDrop, normalizedKifLines, parseKifHeader, parseKifMoveOrDrop, parseTags } from 'shogiops/notation/kif';
 import { makeSfen } from 'shogiops/sfen';
 import type { Square } from 'shogiops/types';
-import { Game, colorName, type Mode } from '../state/game.ts';
+import { Game, colorName, isEndToken, type MoveRecord, type Mode } from '../state/game.ts';
 import { formatTimeControl, parseTimeControl, type MoveTime, type TimeControl } from '../state/clock.ts';
 
 export interface KifMeta {
@@ -73,6 +73,47 @@ function dropKif(usi: string): string {
   return `${zen(f)}${KANJI_RANKS[r - 1]}${kanji}打`;
 }
 
+/**
+ * 入玉宣言の行の前に置くコメント。条件を欠いた宣言は KIF では「反則負け」としか書けず、
+ * 読み戻すときに他の反則と見分けられないので、この目印で宣言だったことを残す
+ */
+const DECLARE_COMMENT = '*入玉宣言';
+
+/** 盤を動かさずに対局を終えた手（投了・切れ負け・入玉宣言）の KIF の書き方 */
+function endMoveKif(m: MoveRecord, game: Game): string | null {
+  if (m.usi === 'resign') return '投了';
+  if (m.usi === 'timeout') return '切れ負け';
+  if (m.usi === 'win') return game.over?.reason.kind === 'declaration' ? '入玉勝ち' : '反則負け';
+  return null;
+}
+
+/**
+ * 終局の行と「まで n 手」を足す。played は行番号の元になる、最後に指した手の番号。
+ * 千日手と手数上限は手を指した結果なので棋譜を読み直せば同じ裁定になるが、他のソフトで開いたときに
+ * 終わり方が分かるように行を書く（手数上限は将棋所と同じく持将棋と書く）
+ */
+function pushEnding(lines: string[], game: Game, played: number): void {
+  const last = game.moves[game.moves.length - 1];
+  const end = last && isEndToken(last.usi) ? last : null;
+  const kind = game.over?.reason.kind;
+  const text = end
+    ? endMoveKif(end, game)
+    : kind === 'sennichite' || kind === 'perpetual_check'
+      ? '千日手'
+      : kind === 'max_moves'
+        ? '持将棋'
+        : null;
+  if (text) {
+    if (end?.usi === 'win') lines.push(DECLARE_COMMENT);
+    lines.push(`${String(played + 1).padStart(4, ' ')} ${pad(text, 14)}${timeText(end?.time)}`);
+  }
+  if (game.over) {
+    const w = game.over.winner;
+    // 「まで n 手」は指した手の数。終局の行は数えない（詰みや裁定で終わったときは行が無い）
+    lines.push(w ? `まで${played}手で${colorName(w)}の勝ち` : `まで${played}手で引き分け`);
+  }
+}
+
 function stamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -106,7 +147,7 @@ function writeTenbinKif(game: Game, meta: KifMeta): string {
   lines.push(`後手：${meta.gote ?? ''}`);
   const tc = formatTimeControl(meta.timeControl ?? null);
   if (tc) lines.push(`持ち時間：${tc}`);
-  const drops = game.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && m.usi !== 'resign' && m.usi !== 'timeout');
+  const drops = game.moves.filter((m) => m.ply !== null && m.phase !== 'normal' && !isEndToken(m.usi));
   // 布石が 0 手（玉を置く前に終わった対局）でもタグは書く。これが天秤将棋の目印で、
   // 無いと局面図も指し手も無い棋譜になり、開き直したときに平手として読まれてしまう
   lines.push(`天秤布石：${drops.map((m) => m.usi).join(' ')}`);
@@ -122,18 +163,8 @@ function writeTenbinKif(game: Game, meta: KifMeta): string {
     n++;
     lines.push(`${String(n).padStart(4, ' ')} ${pad(makeKifMoveOrDrop(step.pos, step.md, step.lastDest) ?? step.record.usi, 14)}${timeText(step.record.time)}`);
   }
-  const last = game.moves[game.moves.length - 1];
-  const ended = !!last && (last.usi === 'resign' || last.usi === 'timeout');
-  if (ended) {
-    n++;
-    lines.push(`${String(n).padStart(4, ' ')} ${pad(last.usi === 'resign' ? '投了' : '切れ負け', 14)}${timeText(last.time)}`);
-  }
-  if (game.over) {
-    const w = game.over.winner;
-    // 「まで n 手」は局面図から数えた本将棋の手数（投了・切れ負けの行は数えない）
-    const played = ended ? n - 1 : n;
-    lines.push(w ? `まで${played}手で${colorName(w)}の勝ち` : `まで${played}手で引き分け`);
-  }
+  // 「まで n 手」は局面図から数えた本将棋の手数
+  pushEnding(lines, game, n);
   return lines.join('\n') + '\n';
 }
 
@@ -166,18 +197,13 @@ function writeDialectKif(game: Game, meta: KifMeta): string {
       lines.push(`*${m.usi}`);
       continue;
     }
-    let text: string;
-    if (m.usi === 'resign') text = '投了';
-    else if (m.usi === 'timeout') text = '切れ負け';
-    else if (m.phase === 'normal') text = normal.get(m.index) ?? m.usi;
-    else text = dropKif(m.usi);
-    if (m.usi !== 'resign' && m.usi !== 'timeout') plies = m.ply ?? plies;
+    // 終局の手は最後に 1 つだけ来る。行は pushEnding が書く
+    if (isEndToken(m.usi)) continue;
+    const text = m.phase === 'normal' ? normal.get(m.index) ?? m.usi : dropKif(m.usi);
+    plies = m.ply ?? plies;
     lines.push(`${String(m.ply ?? 0).padStart(4, ' ')} ${pad(text, 14)}${timeText(m.time)}`);
   }
-  if (game.over) {
-    const w = game.over.winner;
-    lines.push(w ? `まで${plies}手で${colorName(w)}の勝ち` : `まで${plies}手で引き分け`);
-  }
+  pushEnding(lines, game, plies);
   return lines.join('\n') + '\n';
 }
 
@@ -197,18 +223,7 @@ export function writeNormalOnlyKif(game: Game, meta: KifMeta = {}): string | nul
     n++;
     lines.push(`${String(n).padStart(4, ' ')} ${pad(makeKifMoveOrDrop(step.pos, step.md, step.lastDest) ?? step.record.usi, 14)}${timeText(step.record.time)}`);
   }
-  const last = game.moves[game.moves.length - 1];
-  const ended = !!last && (last.usi === 'resign' || last.usi === 'timeout');
-  if (ended) {
-    n++;
-    lines.push(`${String(n).padStart(4, ' ')} ${pad(last.usi === 'resign' ? '投了' : '切れ負け', 14)}${timeText(last.time)}`);
-  }
-  if (game.over) {
-    const w = game.over.winner;
-    // 「まで n 手」は指した手の数。投了・切れ負けの行は数えない（詰みや裁定で終わったときは行が無い）
-    const played = ended ? n - 1 : n;
-    lines.push(w ? `まで${played}手で${colorName(w)}の勝ち` : `まで${played}手で引き分け`);
-  }
+  pushEnding(lines, game, n);
   return lines.join('\n') + '\n';
 }
 
@@ -288,6 +303,7 @@ export function parseKif(text: string): ParsedKif {
   }
   let lastDest: Square | undefined;
   let ply = 0;
+  let declared = false;
   const body = headerEnd >= 0 ? lines.slice(headerEnd + 1) : [];
   for (const raw of body) {
     // normalizedKifLines は ':' を '：' に直すので、本文側はこちらで半角に戻す
@@ -299,6 +315,10 @@ export function parseKif(text: string): ParsedKif {
       times.push(undefined);
       continue;
     }
+    if (line.startsWith(DECLARE_COMMENT)) {
+      declared = true;
+      continue;
+    }
     if (line.startsWith('*') || line.startsWith('#') || line.startsWith('まで')) continue;
     // normalizedKifLines が「同　銀」の全角空白を半角にするので、「同」の後ろの空白は手の一部として読む
     const m = /^(\d+)\s+(同\s*\S+|\S+)(?:\s+(\(.*\)))?/.exec(line);
@@ -307,7 +327,10 @@ export function parseKif(text: string): ParsedKif {
     const time = parseTime(m[3]);
     if (mv === '投了') { tokens.push('resign'); times.push(time); break; }
     if (mv === '切れ負け') { tokens.push('timeout'); times.push(time); break; }
-    if (mv === '中断' || mv === '千日手' || mv === '持将棋' || mv === '不戦勝' || mv === '不戦敗' || mv === '反則勝ち' || mv === '反則負け' || mv === '入玉勝ち' || mv === '詰み' || mv === '不詰') break;
+    // 入玉宣言は並べ直すときに条件を確かめ直す（勝ちか反則負けかは盤で決まる）
+    if (mv === '入玉勝ち' || (mv === '反則負け' && declared)) { tokens.push('win'); times.push(time); break; }
+    // 千日手と持将棋（手数上限）は手を並べれば同じ裁定になるので、行そのものは読まない
+    if (mv === '中断' || mv === '千日手' || mv === '持将棋' || mv === '不戦勝' || mv === '不戦敗' || mv === '反則勝ち' || mv === '反則負け' || mv === '詰み' || mv === '不詰') break;
     ply++;
     if (dialect && ply <= 40) {
       const usi = parseFusekiDrop(mv);

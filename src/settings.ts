@@ -324,7 +324,10 @@ export async function saveSettings(settings: Settings): Promise<void> {
   }
 }
 
-/** 41 手目以降の既定エンジン */
+/**
+ * 41 手目以降の既定エンジン。「布石にも対応」のエンジンも本将棋を指せるので既定にできる。
+ * 既定が決まっていなければ本将棋専用を先に選ぶ
+ */
 export function normalEngine(s: Settings): EngineConfig | null {
-  return s.engines.find((e) => e.id === s.normalEngineId && e.kind === 'normal') ?? s.engines.find((e) => e.kind === 'normal') ?? null;
+  return s.engines.find((e) => e.id === s.normalEngineId) ?? s.engines.find((e) => e.kind === 'normal') ?? s.engines[0] ?? null;
 }
