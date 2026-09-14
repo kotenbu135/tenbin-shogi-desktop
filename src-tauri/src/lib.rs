@@ -498,7 +498,11 @@ async fn download_nvidia_installers(app: AppHandle, cuda: bool, cudnn: bool) -> 
             .map_err(|e| e.to_string())?;
         if !have {
             let part = dir.join(format!("{}.part", d.file));
-            fetch_to(&app, d.url, &part, d.sha256, label, span).await?;
+            // 途中で切れた・空きが足りなかったときに、数 GB の書きかけを「ダウンロード」フォルダに残さない
+            if let Err(e) = fetch_to(&app, d.url, &part, d.sha256, label, span).await {
+                let _ = std::fs::remove_file(&part);
+                return Err(e);
+            }
             std::fs::rename(&part, &to).map_err(|e| format!("置けない: {} ({e})", to.display()))?;
         }
         out.push(to.to_string_lossy().into_owned());

@@ -208,7 +208,8 @@ export class CudaGuide {
         const paths = await invoke<string[]>('download_nvidia_installers', { cuda: kinds.includes('cuda'), cudnn: kinds.includes('cudnn') });
         this.fetched = kinds;
         this.note = t('cuda_fetched');
-        if (paths[0]) void reveal(paths[0]);
+        // 開けなくても置いた場所は出す（ダブルクリックするものが見つからないと先へ進めない）
+        if (paths[0]) await reveal(paths[0]).catch(() => (this.note += `\n${paths.join('\n')}`));
       } else {
         // Windows は読み込み中の DLL を置き換えさせない。検討・対局・棋譜解析のエンジンを先に止める
         this.setNote(t('su_stopping'));
@@ -319,7 +320,7 @@ function openUrl(url: string): void {
 async function reveal(path: string): Promise<void> {
   if (!isTauri()) return;
   const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
-  await revealItemInDir(path).catch(() => undefined);
+  await revealItemInDir(path);
 }
 
 function esc(s: string): string {

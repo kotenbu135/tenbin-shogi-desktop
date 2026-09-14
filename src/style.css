@@ -581,6 +581,7 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .cuda-check .ng { color: var(--ink-2); }
 .cuda-check code { word-break: break-all; }
 .cuda-action { display: grid; gap: 6px; }
+.cuda-dialog .install-note { white-space: pre-wrap; word-break: break-all; }
 .cuda-dialog details summary { cursor: pointer; }
 .cuda-error {margin: 0; padding: 8px 10px; border: 1px solid var(--rule); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
 
