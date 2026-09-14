@@ -11,6 +11,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use usi_host::{EngineEvent, EngineHost, Launch};
 
+mod cuda;
+
 /// フロントエンドへ流すイベントの形。`kind` は line / stderr / exit。
 #[derive(Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -52,6 +54,8 @@ fn engine_start(
             path: PathBuf::from(path),
             args: args.unwrap_or_default(),
             cwd: cwd.filter(|c| !c.is_empty()).map(PathBuf::from),
+            // CUDA 12・cuDNN 9 を標準の場所に入れていれば、利用者が PATH を足さなくても読める（cuDNN のインストーラは足さない）
+            extra_path: cuda::library_dirs(),
         },
         sink,
     )
@@ -425,6 +429,84 @@ async fn install_gpu_engine(app: AppHandle) -> Result<InstalledEngine, String> {
     })
 }
 
+/// CUDA 版への切り替えに要るものが揃っているか（エンジンの実行ファイルのフォルダと、NVIDIA の標準の場所を見る）
+#[tauri::command(async)]
+fn cuda_status(exe: String) -> cuda::Status {
+    cuda::status(std::path::Path::new(&exe))
+}
+
+fn exe_dir(exe: &str) -> Result<PathBuf, String> {
+    std::path::Path::new(exe)
+        .parent()
+        .filter(|d| d.is_dir())
+        .map(|d| d.to_path_buf())
+        .ok_or_else(|| format!("エンジンのフォルダが無い: {exe}"))
+}
+
+/// ONNX Runtime の CUDA 版を取ってきて、エンジンのフォルダの DLL と差し替える。呼ぶ前にエンジンを止めておく
+#[tauri::command]
+async fn install_ort_cuda(app: AppHandle, exe: String) -> Result<(), String> {
+    let dir = exe_dir(&exe)?;
+    let d = &cuda::ORT_CUDA_ZIP;
+    let zip_path = std::env::temp_dir().join(d.file);
+    fetch_to(&app, d.url, &zip_path, d.sha256, "ONNX Runtime の CUDA 版を取りに行っています", (2, 92)).await?;
+    step(&app, "DLL を差し替えています…", 94);
+    let z = zip_path.clone();
+    let r = tauri::async_runtime::spawn_blocking(move || cuda::swap_in(&z, &dir))
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&zip_path);
+    r?;
+    step(&app, "できました", 100);
+    Ok(())
+}
+
+/// DirectML 版に戻す。呼ぶ前にエンジンを止めておく
+#[tauri::command(async)]
+fn restore_ort_dml(exe: String) -> Result<(), String> {
+    cuda::swap_out(&exe_dir(&exe)?)
+}
+
+/// 足りない NVIDIA のインストーラを「ダウンロード」フォルダに取ってくる（インストールは利用者が行う）。
+/// 既に同じものがあれば取り直さない。戻り値は置いた場所
+#[tauri::command]
+async fn download_nvidia_installers(app: AppHandle, cuda: bool, cudnn: bool) -> Result<Vec<String>, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("「ダウンロード」フォルダが分からない: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("作れない: {} ({e})", dir.display()))?;
+    let list: Vec<(&cuda::Download, &str)> = [
+        (cuda, &cuda::CUDA_INSTALLER, "CUDA 12 のインストーラを取りに行っています"),
+        (cudnn, &cuda::CUDNN_INSTALLER, "cuDNN 9 のインストーラを取りに行っています"),
+    ]
+    .into_iter()
+    .filter(|(want, _, _)| *want)
+    .map(|(_, d, label)| (d, label))
+    .collect();
+    let total: u64 = list.iter().map(|(d, _)| d.size).sum::<u64>().max(1);
+    let mut done: u64 = 0;
+    let mut out = Vec::new();
+    for (d, label) in list {
+        let span = ((2 + 96 * done / total) as u32, (2 + 96 * (done + d.size) / total) as u32);
+        done += d.size;
+        let to = dir.join(d.file);
+        step(&app, "取ってあるものを確かめています…", span.0);
+        let (t, dd) = (to.clone(), d);
+        let have = tauri::async_runtime::spawn_blocking(move || cuda::already_fetched(&t, dd))
+            .await
+            .map_err(|e| e.to_string())?;
+        if !have {
+            let part = dir.join(format!("{}.part", d.file));
+            fetch_to(&app, d.url, &part, d.sha256, label, span).await?;
+            std::fs::rename(&part, &to).map_err(|e| format!("置けない: {} ({e})", to.display()))?;
+        }
+        out.push(to.to_string_lossy().into_owned());
+    }
+    step(&app, "できました", 100);
+    Ok(out)
+}
+
 /// アプリのデータフォルダ（設定とエンジンの置き場所）。案内とアンインストールの説明に使う。
 #[tauri::command]
 fn data_dir(app: AppHandle) -> Result<String, String> {
@@ -609,6 +691,10 @@ pub fn run() {
             open_path,
             cpu_info,
             gpu_adapters,
+            cuda_status,
+            install_ort_cuda,
+            restore_ort_dml,
+            download_nvidia_installers,
         ])
         .on_window_event(move |window, event| {
             // 窓を閉じたらエンジンを残さない。残すとやねうら王が Threads ぶんの CPU を握り続ける。

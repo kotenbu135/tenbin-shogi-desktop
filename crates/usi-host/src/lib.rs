@@ -54,6 +54,9 @@ pub struct Launch {
     /// 省略時は実行ファイルのあるディレクトリ。やねうら王は評価関数や定跡を
     /// カレントディレクトリからの相対で探すので、ここを外すと `isready` で止まる。
     pub cwd: Option<PathBuf>,
+    /// 子プロセスの `PATH` の**末尾**に足すフォルダ。GPU のエンジンが読む DLL（CUDA・cuDNN）の置き場所を
+    /// 利用者に環境変数で足させないため。末尾なので、実行ファイルの隣の DLL や元の `PATH` より後に探される
+    pub extra_path: Vec<PathBuf>,
 }
 
 impl EngineHost {
@@ -89,6 +92,9 @@ impl EngineHost {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(path) = extended_path(std::env::var_os("PATH"), &launch.extra_path) {
+            cmd.env("PATH", path);
+        }
         #[cfg(windows)]
         {
             // コンソール窓を出さない。
@@ -166,6 +172,21 @@ impl EngineHost {
             let _ = self.stop_locked(&id, grace);
         }
     }
+}
+
+/// 元の `PATH` の末尾に `extra` を足したもの。足すものが無い（どれも既に入っている）なら None
+fn extended_path(current: Option<std::ffi::OsString>, extra: &[PathBuf]) -> Option<std::ffi::OsString> {
+    let mut dirs: Vec<PathBuf> = current.as_deref().map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
+    let before = dirs.len();
+    for d in extra {
+        if !dirs.iter().any(|x| x == d) {
+            dirs.push(d.clone());
+        }
+    }
+    if dirs.len() == before {
+        return None;
+    }
+    std::env::join_paths(dirs).ok()
 }
 
 fn default_cwd(path: &Path) -> PathBuf {
@@ -256,7 +277,7 @@ mod tests {
         let sink: EventSink = Arc::new(move |ev| {
             let _ = tx.send(ev);
         });
-        host.start("sjis", Launch { path: cat_path(), args: vec![], cwd: None }, sink).unwrap();
+        host.start("sjis", Launch { path: cat_path(), args: vec![], cwd: None, extra_path: vec![] }, sink).unwrap();
         // 「やねうら王」の Shift_JIS
         let bytes: Vec<u8> = b"id name "
             .iter()
@@ -285,7 +306,7 @@ mod tests {
         });
         host.start(
             "e1",
-            Launch { path: cat_path(), args: vec![], cwd: None },
+            Launch { path: cat_path(), args: vec![], cwd: None, extra_path: vec![] },
             sink,
         )
         .unwrap();
@@ -322,7 +343,7 @@ mod tests {
         let sink: EventSink = Arc::new(move |ev| {
             let _ = tx.send(ev);
         });
-        host.start("y", Launch { path: PathBuf::from(path), args: vec![], cwd: None }, sink).unwrap();
+        host.start("y", Launch { path: PathBuf::from(path), args: vec![], cwd: None, extra_path: vec![] }, sink).unwrap();
         host.send("y", "usi").unwrap();
         let wait = |pred: &dyn Fn(&str) -> bool, secs: u64| -> Vec<String> {
             let deadline = Instant::now() + Duration::from_secs(secs);
@@ -365,7 +386,7 @@ mod tests {
         });
         host.start(
             "dead",
-            Launch { path: PathBuf::from("/bin/sh"), args: vec!["-c".into(), "exit 7".into()], cwd: None },
+            Launch { path: PathBuf::from("/bin/sh"), args: vec!["-c".into(), "exit 7".into()], cwd: None, extra_path: vec![] },
             sink,
         )
         .unwrap();
@@ -385,11 +406,43 @@ mod tests {
         let sink: EventSink = Arc::new(|_| {});
         let r = host.start(
             "x",
-            Launch { path: PathBuf::from("/nonexistent/engine.exe"), args: vec![], cwd: None },
+            Launch { path: PathBuf::from("/nonexistent/engine.exe"), args: vec![], cwd: None, extra_path: vec![] },
             sink,
         );
         assert!(r.is_err());
         assert!(!host.is_running("x"));
+    }
+
+    #[test]
+    fn extra_path_goes_last_and_once() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let cur = std::ffi::OsString::from(format!("/a{sep}/b"));
+        let got = extended_path(Some(cur.clone()), &[PathBuf::from("/c"), PathBuf::from("/a")]).unwrap();
+        assert_eq!(got, std::ffi::OsString::from(format!("/a{sep}/b{sep}/c")));
+        assert_eq!(extended_path(Some(cur), &[PathBuf::from("/b")]), None);
+        assert_eq!(extended_path(None, &[]), None);
+    }
+
+    /// 子プロセスに足した `PATH` が届くこと
+    #[cfg(unix)]
+    #[test]
+    fn child_sees_extra_path() {
+        let host = EngineHost::new();
+        let (tx, rx) = mpsc::channel();
+        let sink: EventSink = Arc::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        let launch = Launch {
+            path: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "echo \"$PATH\"".into()],
+            cwd: None,
+            extra_path: vec![PathBuf::from("/tenbin-extra-dir")],
+        };
+        host.start("p", launch, sink).unwrap();
+        let ev = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let EngineEvent::Line { line, .. } = ev else { panic!("{ev:?}") };
+        assert!(line.ends_with(":/tenbin-extra-dir"), "{line}");
+        let _ = host.stop("p", Duration::from_secs(1));
     }
 
     #[test]

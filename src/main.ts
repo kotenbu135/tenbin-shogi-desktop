@@ -119,6 +119,8 @@ async function main(): Promise<void> {
     save: () => saveSettings(settings),
     busy: () => (driver.active && !driver.isPaused && game.phase !== 'over') || kifuAnalyzer.running,
     say: (text) => say(text),
+    // DLL を差し替える前にエンジンを止める（Windows は読み込み中の DLL を置き換えさせない）
+    beforeInstall: () => updateDeps.beforeInstall(),
   });
   void detectNvidia();
   onProviderReport((cfg, r) => void cudaGuide.consider(cfg, r));
