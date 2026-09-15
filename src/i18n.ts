@@ -109,7 +109,7 @@ const DICT = {
   tb_new: { ja: '新しい対局', en: 'New game' },
   tb_new_title: { ja: '新しい対局（Ctrl+N）', en: 'New game (Ctrl+N)' },
   tb_undo: { ja: '待った', en: 'Take back' },
-  tb_undo_title: { ja: '待った・1 手戻す（Backspace）', en: 'Take back one move (Backspace)' },
+  tb_undo_title: { ja: '待った・自分の番まで戻す（Backspace）', en: 'Take back to your turn (Backspace)' },
   tb_resign: { ja: '投了', en: 'Resign' },
   tb_resign_title: { ja: '投了', en: 'Resign' },
   tb_declare: { ja: '入玉宣言', en: 'Declare' },

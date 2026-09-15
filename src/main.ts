@@ -577,9 +577,17 @@ async function main(): Promise<void> {
   function undo(): void {
     if (game.moves.length === 0 || editor) return;
     cursor = null;
-    const tokens = game.tokens().slice(0, -1);
-    const times = game.times().slice(0, -1);
-    game = rebuild(fuseki, game.mode, tokens, { startSfen: game.normalStartSfen ?? undefined, times, rules: game.rules });
+    const tokens = game.tokens();
+    const times = game.times();
+    const mode = game.mode;
+    const opts = { startSfen: game.normalStartSfen ?? undefined, rules: game.rules };
+    // エンジンと指しているなら人の番まで戻す。相手の手だけ消すと、すぐ指し直されて相手の番に見える。
+    // 段階でエンジンに任せた側（布石を両方ともエンジンが置く等）までは遡らない
+    let n = tokens.length;
+    do {
+      n--;
+      game = rebuild(fuseki, mode, tokens.slice(0, n), { ...opts, times: times.slice(0, n) });
+    } while (n > 0 && engineToMoveAgainstHuman());
     dropEvalsAfter(game.nextPly - 1);
     board.clearSelection();
     // 残り時間を記録から組み直す（枠の入れ替えも時間切れで 0 にした分もここで戻る）
@@ -588,6 +596,12 @@ async function main(): Promise<void> {
     if (driver.isPaused) clock.pause(); // 止めている間に戻しても時計は動かさない
     paintAll();
     driver.interrupt();
+  }
+
+  /** いまの局面で、エンジンの席が指す番で、もう一方の席を人が指すか */
+  function engineToMoveAgainstHuman(): boolean {
+    const seat = driver.seatToMove();
+    return seat !== null && !driver.humanAt(seat) && driver.humanAt(seat === 0 ? 1 : 0);
   }
 
   function say(text: string, error = false): void {
