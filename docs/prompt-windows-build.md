@@ -50,8 +50,9 @@ Windows で動かすために必要な修正だけをします。
    - 「保存」→ KIF が書けて、「開く」で読める（天秤将棋は形が 1 つ。布石将棋のときだけ 対局全体 / 本将棋だけ を選ぶ）
 4. `npm run tauri build` → `src-tauri\target\release\bundle\nsis\*.exe`。インストールして 3 の起動確認だけを繰り返す。
    インストーラの大きさと、初回起動の時間を記録する。
-5. 直したことは **ブランチ `windows-build`** にコミットして push する（main に直接は入れない）。
-   コミットメッセージは日本語で、何が Windows で壊れていたかを書く。
+5. 直したことは **main から切った新しいブランチ** にコミットして push する（main に直接は入れない）。
+   名前は `windows-build-<日付>`（例 `windows-build-2026-10-01`）。既にあるブランチを使い回さず、
+   そのときの main から切る。コミットメッセージは日本語で、何が Windows で壊れていたかを書く。
    `git push` で LFS のフックが空振りする環境があるので、その場合は `git -c core.hooksPath=/dev/null push`。
 
 ## 報告
