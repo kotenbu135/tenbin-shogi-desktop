@@ -42,7 +42,7 @@ curl -sIL -o /dev/null -w '%{http_code}\n' https://github.com/kotenbu135/tenbin-
   利用者は古い版を起動し続け、「新しい版があります」が毎回出る（0.4.0 で踏んだ）。
   変えるなら、前の名前をアンインストールしてもらう案内を Release の本文と README に必ず添える。
   実行ファイル名は `mainBinaryName` で固定してある（Cargo の `name` に付いていかないように）
-- GitHub は資産名から日本語を落とす（`天秤将棋GUI_…` → `GUI_…`。ワークフローが消す）。tauri-action の `includeUpdaterJson`
+- GitHub は資産名から日本語を落とす（`天秤将棋GUI_…` → `GUI_…`。ワークフローが消す）。tauri-action の `uploadUpdaterJson`（v1 より前は `includeUpdaterJson`）
   では署名を見つけられないので、`latest.json` はワークフローの中で自分で組み立てる
 - ビルドの成果物はワークスペースの根の `target/`（`src-tauri/target` ではない）
 - `set -o pipefail` の下で `ls A B` は片方が無いと落ちる → `find` で探す
