@@ -236,7 +236,7 @@ Windows のビルドが 4 回落ちた。次に触る人のために。
 2. **GitHub はアセット名から日本語を落とす**。`天秤将棋_0.2.0_x64-setup.exe` → `_0.2.0_x64-setup.exe`。
    そのせいで tauri-action が対応する `.sig` を名前で引けず、
    `Signature not found for the updater JSON. Skipping upload...` と言って **latest.json を上げない**。
-   → `includeUpdaterJson: false` にして、**自分で** 読める名前を付け直し、latest.json を組み立てる。
+   → `uploadUpdaterJson: false`（tauri-action v1 より前は `includeUpdaterJson`）にして、**自分で** 読める名前を付け直し、latest.json を組み立てる。
    URL は `…/releases/download/<タグ>/<名前>` の形（下書きのときの `untagged-…` を使ってはいけない）
 3. `target` は**ワークスペースの根**にある（`crates/usi-host` と `src-tauri` で共有）。`src-tauri/target` ではない
 4. `set -o pipefail` の下で `ls A B`（片方が無い）は終了コード 2 を返し、ステップごと落ちる。`find` で探す
