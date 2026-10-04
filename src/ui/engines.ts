@@ -8,7 +8,8 @@ import { COMMON_OPTIONS, GPU_READY_SEC, READY_SEC, SUMMARY_OPTIONS, UsiEngine, i
 import { EVAL_PRESETS, evalFromDeclaration, presetOf, recipeFor, type EvalScale } from '../usi/evalscale.ts';
 import type { UsiOption } from '../usi/parse.ts';
 import { PROVIDER_LABELS, cudaAdvice, type CudaAdvice, type ProviderReport } from '../usi/provider.ts';
-import { BUILTIN_ID, normalEngine, type Settings } from '../settings.ts';
+import { fusekiEngine, normalEngine, type Settings } from '../settings.ts';
+import { libraUnsupported } from '../usi/libra.ts';
 import type { Key } from '../i18n.ts';
 import { knownNvidia } from './cuda.ts';
 
@@ -22,27 +23,6 @@ const OPTION_LABELS: Record<string, Key> = {
   DNN_Batch_Size: 'en_opt_batch',
 };
 
-/** 布石の模型一式（世代）の、画面に出すぶん */
-export interface ModelSetView {
-  id: string;
-  name: string;
-  /** 差し替えのフォルダ。同梱なら null */
-  dir: string | null;
-  generation: string;
-  /** 両玉の価値表が載ったか（載らなければ天秤将棋の 1〜2 手目だけ閉じる） */
-  kings: boolean;
-  kingsError: string | null;
-  /** 一式ごと載せられなかった理由 */
-  error: string | null;
-}
-
-export interface ModelSetApi {
-  list(): ModelSetView[];
-  /** フォルダを足す。戻りはエラー文で、成功なら null */
-  add(dir: string): Promise<string | null>;
-  remove(id: string): void;
-}
-
 export interface EngineDialogDeps {
   settings(): Settings;
   save(): Promise<void>;
@@ -50,8 +30,6 @@ export interface EngineDialogDeps {
   onLog(engineName: string, dir: 'in' | 'out' | 'err' | 'sys', text: string): void;
   /** USI の生ログを出す（エンジンが起動しないときの手がかり） */
   openLog(): void;
-  /** 布石の模型一式（世代）の付け外し */
-  models: ModelSetApi;
   /** CUDA 版への切り替えの案内を開く（「今後表示しない」にしていても開く） */
   openCudaGuide(cfg: EngineConfig, report: ProviderReport, advice: CudaAdvice): void;
 }
@@ -70,6 +48,10 @@ export interface InstallSpec {
   options?: Record<string, string>;
   /** 本将棋の既定にするか。'if-none' は既定がまだ無いときだけ（利用者の選択を上書きしない） */
   makeDefault: 'always' | 'if-none';
+  /** 布石の既定にもする（布石対応のエンジン、Libra） */
+  makeDefaultFuseki?: boolean;
+  /** この登録を置き換える（id と利用者が決めた設定を引き継ぐ）。Libra を新しいリリースへ入れ替えるとき */
+  replaceId?: string;
 }
 
 export class EngineDialog {
@@ -111,13 +93,6 @@ export class EngineDialog {
           <button type="button" data-act="import">${t('en_import')}</button>
           <button type="button" data-act="add" class="primary">${t('en_add')}</button>
         </div>
-        <h3 class="models-head">${t('en_models_title')}</h3>
-        <p class="hint">${t('en_models_intro')}</p>
-        <ul class="model-list"></ul>
-        <p class="model-error" hidden></p>
-        <div class="dialog-actions">
-          <button type="button" data-act="add-models">${t('en_models_add')}</button>
-        </div>
       </form>`;
     const ul = d.querySelector('.engine-list')!;
     if (s.engines.length === 0) {
@@ -128,13 +103,17 @@ export class EngineDialog {
     }
     // 「布石にも対応」のエンジンも本将棋の既定にできる（Libra を 1 本登録すれば最後まで指せる）
     const normalDefault = normalEngine(s);
+    const fusekiDefault = fusekiEngine(s);
     for (const e of s.engines) {
       const li = document.createElement('li');
       li.className = 'engine-item';
       const badges: string[] = [];
       badges.push(`<span class="engine-kind">${t(e.kind === 'fuseki' ? 'en_kind_fuseki' : 'en_kind_normal')}</span>`);
       if (normalDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_normal')}</span>`);
-      if (e.kind === 'fuseki' && s.fusekiEngineId === e.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
+      if (fusekiDefault?.id === e.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
+      if (s.libra?.engineId === e.id) badges.push(`<span class="engine-kind">${t('en_libra_auto', { tag: s.libra.tag })}</span>`);
+      // Libra 0.2 以前は玉配置表で両玉を置く版で、サポートを終えた（0.11.0）
+      if (libraUnsupported(e)) badges.push(`<span class="engine-gpu">${t('en_libra_unsupported')}</span>`);
       if (e.gpu) badges.push(`<span class="engine-gpu">${t('en_gpu_badge')}</span>`);
       // 出す項目はエンジンによって違う（NNUE は Threads/USI_Hash、GPU のものは UCT_Threads/DNN_Model）。
       // 持っているものだけを頭から 3 つ出す
@@ -155,7 +134,7 @@ export class EngineDialog {
         <div class="engine-actions">
           <button type="button" data-act="edit">${t('en_edit')}</button>
           <button type="button" data-act="dup">${t('en_dup')}</button>
-          <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : s.fusekiEngineId === e.id) ? 'disabled' : ''}>${t(e.kind === 'fuseki' ? 'en_make_default_fuseki' : 'en_make_default_normal')}</button>
+          <button type="button" data-act="default" ${(e.kind === 'normal' ? normalDefault?.id === e.id : fusekiDefault?.id === e.id) ? 'disabled' : ''}>${t(e.kind === 'fuseki' ? 'en_make_default_fuseki' : 'en_make_default_normal')}</button>
           ${e.kind === 'fuseki' ? `<button type="button" data-act="default-normal" ${normalDefault?.id === e.id ? 'disabled' : ''}>${t('en_make_default_normal')}</button>` : ''}
           ${advice ? `<button type="button" data-act="cuda">${t(advice === 'fallback' ? 'en_cuda_fallback' : 'en_cuda_switch')}</button>` : ''}
           <button type="button" data-act="remove" class="danger">${t('en_remove')}</button>
@@ -184,13 +163,14 @@ export class EngineDialog {
         if (!confirm(t('en_remove_confirm', { name: e.name || e.path }))) return;
         s.engines = s.engines.filter((x) => x.id !== e.id);
         if (s.normalEngineId === e.id) s.normalEngineId = undefined;
-        if (s.fusekiEngineId === e.id) s.fusekiEngineId = BUILTIN_ID;
+        if (s.fusekiEngineId === e.id) s.fusekiEngineId = undefined;
+        // 自動で入れた Libra を外したら、次の起動で入れ直す（「最新の Libra を既定に」の約束を保つ）
+        if (s.libra?.engineId === e.id) s.libra = undefined;
         s.analysisSlots = s.analysisSlots.map((x) => (x === e.id ? 'auto' : x));
         void this.persist();
       });
       ul.appendChild(li);
     }
-    this.paintModels();
     d.querySelector('[data-act="log"]')!.addEventListener('click', () => {
       this.dialog.close();
       this.deps.openLog();
@@ -200,70 +180,6 @@ export class EngineDialog {
     d.querySelector('[data-act="open-dir"]')!.addEventListener('click', () => {
       if (this.enginesDir) void invoke('open_path', { path: this.enginesDir }).catch(() => undefined);
     });
-  }
-
-  /** 布石の模型一式（世代）の一覧。同梱は外せない。足したフォルダは既定にもできる */
-  private paintModels(): void {
-    const s = this.deps.settings();
-    const ul = this.dialog.querySelector('.model-list');
-    if (!ul) return;
-    ul.replaceChildren();
-    for (const m of this.deps.models.list()) {
-      const li = document.createElement('li');
-      li.className = 'model-item';
-      const badges: string[] = [];
-      if (m.dir === null) badges.push(`<span class="engine-kind">${t('en_models_bundled')}</span>`);
-      if (s.fusekiEngineId === m.id) badges.push(`<span class="engine-default">${t('en_default_fuseki')}</span>`);
-      if (m.error) badges.push(`<span class="engine-gpu">${t('en_models_broken')}</span>`);
-      else if (!m.kings) badges.push(`<span class="engine-gpu">${t('en_models_no_kings')}</span>`);
-      const detail = m.error ?? m.kingsError ?? '';
-      // 名前が世代そのものなら二度書かない（同梱は「内蔵の布石評価」なので世代を添える）
-      const gen = m.generation && m.generation !== m.name ? m.generation : '';
-      li.innerHTML = `
-        <div class="engine-name">${esc(m.name || m.generation || t('en_noname'))} ${badges.join(' ')}</div>
-        <div class="engine-path">${esc(m.dir ?? t('en_models_bundled_path'))}</div>
-        ${gen || detail ? `<div class="engine-meta">${esc(gen)}${detail ? `${gen ? ' · ' : ''}${esc(detail)}` : ''}</div>` : ''}
-        <div class="engine-actions">
-          <button type="button" data-act="model-default" ${s.fusekiEngineId === m.id || m.error ? 'disabled' : ''}>${t('en_make_default_fuseki')}</button>
-          ${m.dir === null ? '' : `<button type="button" data-act="model-remove" class="danger">${t('en_remove')}</button>`}
-        </div>`;
-      li.querySelector('[data-act="model-default"]')!.addEventListener('click', () => {
-        s.fusekiEngineId = m.id;
-        void this.persist();
-      });
-      li.querySelector('[data-act="model-remove"]')?.addEventListener('click', () => {
-        if (!confirm(t('en_remove_confirm', { name: m.name || m.dir || '' }))) return;
-        this.deps.models.remove(m.id);
-        this.paintList();
-      });
-      ul.appendChild(li);
-    }
-    this.dialog.querySelector('[data-act="add-models"]')!.addEventListener('click', () => void this.addModels());
-  }
-
-  /** models.json のあるフォルダを足す。載せてみて駄目ならその場で理由を出す */
-  private async addModels(): Promise<void> {
-    const err = this.dialog.querySelector<HTMLElement>('.model-error');
-    if (!isTauri()) {
-      if (err) {
-        err.textContent = t('en_models_tauri_only');
-        err.hidden = false;
-      }
-      return;
-    }
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const dir = await open({ multiple: false, directory: true, title: t('en_models_pick') });
-    if (typeof dir !== 'string') return;
-    this.busy(t('en_models_loading', { dir }));
-    const msg = await this.deps.models.add(dir);
-    this.paintList();
-    if (msg) {
-      const el = this.dialog.querySelector<HTMLElement>('.model-error');
-      if (el) {
-        el.textContent = t('en_models_add_failed', { msg });
-        el.hidden = false;
-      }
-    }
   }
 
   private async persist(): Promise<void> {
@@ -278,25 +194,35 @@ export class EngineDialog {
 
   /** 取り込んだばかりのエンジンを登録する。戻り値は申告を読めなかったときの理由 */
   async addInstalled(spec: InstallSpec): Promise<string | null> {
+    const s = this.deps.settings();
+    const prev = spec.replaceId ? s.engines.find((e) => e.id === spec.replaceId) : undefined;
     const cfg = newEngineConfig();
     cfg.path = spec.path;
     cfg.name = spec.name;
+    // 置き換えなら、利用者が決めた設定（Threads など）と GPU の扱いを引き継ぐ。申告に無くなった項目は捨てる
+    if (prev) {
+      cfg.options = { ...prev.options };
+      cfg.gpu = prev.gpu;
+      cfg.readySec = prev.readySec;
+    }
     const err = await this.probeInto(cfg, false);
-    cfg.kind = 'normal';
+    // 種別は申告から決まる（Fuseki_ を名乗れば布石にも対応）。申告を読めなければ本将棋として登録する
+    if (err) cfg.kind = 'normal';
     cfg.eval = { ...spec.eval };
+    if (cfg.declared) for (const k of Object.keys(cfg.options)) if (!cfg.declared.some((o) => o.name === k)) delete cfg.options[k];
     // 取り込んだものだけが知っている場所（モデルのファイルなど）を入れる。
     // 申告の既定と同じ値は持たない（applyOptions が送らない）ので、上書きだけを残す
     for (const [k, v] of Object.entries(spec.options ?? {})) {
       if (cfg.declared?.find((o) => o.name === k)?.default !== v) cfg.options[k] = v;
     }
-    const s = this.deps.settings();
-    // 同じ場所のものは置き換える（入れ直しても増やさない）
-    const i = s.engines.findIndex((e) => e.path === spec.path);
+    // 置き換える登録か、同じ場所のものは置き換える（入れ直しても増やさない）
+    const i = prev ? s.engines.indexOf(prev) : s.engines.findIndex((e) => e.path === spec.path);
     if (i >= 0) cfg.id = s.engines[i]!.id;
     if (i >= 0) s.engines[i] = cfg;
     else s.engines.push(cfg);
     const hasDefault = s.engines.some((e) => e.id === s.normalEngineId);
     if (spec.makeDefault === 'always' || !hasDefault) s.normalEngineId = cfg.id;
+    if (spec.makeDefaultFuseki && cfg.kind === 'fuseki') s.fusekiEngineId = cfg.id;
     await this.persist();
     return err;
   }

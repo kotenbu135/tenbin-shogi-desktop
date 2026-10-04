@@ -7,7 +7,7 @@
 import { t } from '../i18n.ts';
 import type { EngineConfig, Thinker } from '../usi/engine.ts';
 import type { UsiInfo } from '../usi/parse.ts';
-import { normalEngine, type Settings } from '../settings.ts';
+import { fusekiEngine, normalEngine, type Settings } from '../settings.ts';
 import { evalOfInfo, type Target } from './analysis.ts';
 import { MAX_SCORE } from './graph.ts';
 
@@ -60,7 +60,7 @@ export class KifuAnalyzer {
   private resolve(t: Target): string | null {
     const s = this.deps.settings();
     if (t.stage === 'normal') return normalEngine(s)?.id ?? null;
-    return s.fusekiEngineId;
+    return fusekiEngine(s)?.id ?? null;
   }
 
   /** 解析した局面の数を返す */

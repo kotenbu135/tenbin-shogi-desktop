@@ -615,25 +615,28 @@ fieldset.kind label { display: flex; gap: 6px; align-items: center; }
 .kifu-move.current .tm { color: var(--ink-2); }
 
 /* ---- 局面編集 ---- */
-.editor { background: var(--panel); border: 1px solid var(--rule); padding: 8px 12px; display: grid; gap: 6px; }
+.editor { background: var(--panel); border: 1px solid var(--rule); padding: 6px 12px; }
 .editor[hidden] { display: none; }
-.editor-head { display: flex; gap: 12px; align-items: baseline; }
+/* 局面編集は 1 行の帯。駒は盤と駒台で動かすので、ここには手番・駒箱・操作だけを置く */
+.editor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .editor-title { font-weight: 600; }
-.editor-hint { color: var(--ink-3); font-size: 12px; }
-.editor-body { display: grid; gap: 6px; }
-.palette-row { display: flex; align-items: center; gap: 3px; }
-.palette-label { width: 4em; color: var(--ink-2); }
-.palette-piece { position: relative; width: 38px; height: 41px; padding: 0; border: 1px solid transparent; background: transparent; }
-.palette-piece:hover { background: var(--panel-2); }
-.palette-piece.selected { background: var(--sel, rgba(20, 85, 30, 0.25)); border-color: var(--ink); }
-.palette-piece .piece { inset: 6% 8% 4% 8%; }
-.editor-tools { display: flex; align-items: center; gap: 10px; }
-.editor-tools button.selected { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.editor-holding { color: var(--ink-2); }
-.editor-turn { display: flex; gap: 12px; align-items: center; color: var(--ink-2); }
-.editor-turn label { display: flex; gap: 4px; align-items: center; color: var(--ink); }
-.editor-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.editor-actions .primary { margin-left: auto; }
+.editor-turn { display: flex; gap: 0; }
+.editor-turn button { border-radius: 0; }
+.editor-turn button:first-child { border-radius: 4px 0 0 4px; }
+.editor-turn button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.editor-turn button.selected { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.editor-box {
+  display: flex; align-items: center; gap: 2px; min-height: 40px; min-width: 7em; padding: 2px 8px;
+  border: 1px dashed var(--rule); border-radius: 4px; cursor: pointer;
+}
+.editor-box.target { border-color: var(--ink-2); background: var(--panel-2); }
+.editor-box-label { color: var(--ink-3); font-size: 12px; margin-right: 4px; }
+.box-piece { position: relative; width: 34px; height: 37px; padding: 0; border: 1px solid transparent; background: transparent; }
+.box-piece:hover { background: var(--panel-2); }
+.box-piece.selected { background: var(--selected); border-color: var(--ink); }
+.box-piece .piece { inset: 6% 8% 4% 8%; }
+.box-piece .count { position: absolute; right: 0; bottom: 0; font-size: 11px; font-weight: 600; }
+.editor-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 .shogi.editing .cell { cursor: pointer; }
 .shogi.editing .slot { cursor: pointer; }
 .shogi.editing .slot.dim { opacity: 0.35; }

@@ -1,13 +1,13 @@
 // 新しい対局のダイアログ。ルール、席ごとの対局者（人か、登録したエンジンか）、持ち時間と秒読み。
 //
 // 席は 2 つ。天秤将棋では「玉を置く側」と「先後を選ぶ側」、布石将棋では先手と後手。
-// エンジンの席は、本将棋（41 手目から）に使う USI エンジンと、布石（40 手）に使うもの（内蔵の方策か
-// 布石対応のエンジン）を別々に選ぶ。強さは公開サイトのレベルと同じ温度の刻み。
+// エンジンの席は、本将棋（41 手目から）に使う USI エンジンと、布石（40 手）に使う布石対応のエンジン（Libra など）を
+// 別々に選ぶ。同じエンジンを選べば 1 本のプロセスが 1 手目から終局まで指す。
 
 import { t } from '../i18n.ts';
 import type { Mode } from '../state/game.ts';
 import type { TimeControl } from '../state/clock.ts';
-import { BUILTIN_ID, type Settings } from '../settings.ts';
+import { fusekiEngine, type Settings } from '../settings.ts';
 
 /** 布石を人が置くことを指す id（本将棋の「人が指す」と対になる） */
 export const HUMAN_ID = 'human';
@@ -18,10 +18,8 @@ export type PlayerSpec =
       type: 'engine';
       /** 41 手目以降の USI エンジン id（無ければ '' で、本将棋は人が指す） */
       normalId: string;
-      /** 布石に使うもの。'builtin'・足した模型一式 'builtin:xxxx'・布石対応のエンジン id */
+      /** 布石に使う布石対応のエンジン id。HUMAN_ID なら布石は人が置く */
       fusekiId: string;
-      /** 1〜5。内蔵の方策の温度と探索 */
-      level: number;
       /** 持ち時間が無いときの 1 手の秒数 */
       secPerMove: number;
     };
@@ -34,20 +32,6 @@ export interface NewGameChoice {
   timeControl: TimeControl | null;
 }
 
-/** 内蔵の方策のレベル。公開サイトの LEVELS と同じ温度。5 は価値ネットで K=8 の最善 */
-export const LEVELS: { level: number; temperature: number; search: number }[] = [
-  { level: 1, temperature: 1.0, search: 1 },
-  { level: 2, temperature: 0.8, search: 1 },
-  { level: 3, temperature: 0.6, search: 1 },
-  { level: 4, temperature: 0.4, search: 1 },
-  { level: 5, temperature: 0.4, search: 8 },
-];
-
-/** 選び札に出す名前。1 だけ言葉を添える（何が変わるのか分かるように） */
-function levelLabel(level: number): string {
-  return level === 1 ? t('ng_level1') : String(level);
-}
-
 export class NewGameDialog {
   private readonly dialog: HTMLDialogElement;
   private resolve: ((c: NewGameChoice | null) => void) | null = null;
@@ -57,7 +41,7 @@ export class NewGameDialog {
   private chosePerson: [boolean, boolean] = [false, false];
   private last: NewGameChoice = {
     mode: 'tenbin',
-    seats: [{ type: 'engine', normalId: '', fusekiId: BUILTIN_ID, level: 4, secPerMove: 3 }, { type: 'human' }],
+    seats: [{ type: 'engine', normalId: '', fusekiId: '', secPerMove: 3 }, { type: 'human' }],
     names: ['', ''],
     timeControl: null,
   };
@@ -79,6 +63,8 @@ export class NewGameDialog {
     // 両方を並べる（本将棋専用を先に）。布石と同じエンジンを選べば、同じ 1 本のプロセスが続けて指す
     const normals = [...s.engines.filter((e) => e.kind === 'normal'), ...s.engines.filter((e) => e.kind === 'fuseki')];
     const fusekis = s.engines.filter((e) => e.kind === 'fuseki');
+    // 布石の既定は布石対応のエンジン（Libra）。1 本も無ければ人が置く
+    const defFuseki = fusekiEngine(s)?.id ?? HUMAN_ID;
     const mainMin = l.timeControl ? Math.round(l.timeControl.mainSec / 60) : 0;
     const byo = l.timeControl?.byoyomiSec ?? 0;
     // 登録済みのエンジンを既定にする。前に開いたとき 1 本も無ければ normalId が空のまま
@@ -90,16 +76,15 @@ export class NewGameDialog {
       const base =
         p.type === 'engine'
           ? p
-          : { normalId: this.chosePerson[i] ? '' : defNormal, fusekiId: s.fusekiEngineId, level: 4, secPerMove: 3 };
-      // 布石は「人が置く」「同梱の模型」「足した模型一式（世代）」「布石対応のエンジン」から選ぶ。
-      // 席ごとに別の世代を置けるので、世代どうしを戦わせられる
-      const fusekiIds = [HUMAN_ID, BUILTIN_ID, ...s.modelSets.map((m) => m.id), ...fusekis.map((e) => e.id)];
+          : { normalId: this.chosePerson[i] ? '' : defNormal, fusekiId: defFuseki, secPerMove: 3 };
+      // 布石は「人が置く」か「布石対応のエンジン」から選ぶ
+      const fusekiIds = [HUMAN_ID, ...fusekis.map((e) => e.id)];
       const eng = {
         ...base,
         normalId:
           normals.some((e) => e.id === base.normalId) || (base.normalId === '' && this.chosePerson[i]) ? base.normalId : defNormal,
         // 布石も同じ。消えたエンジンを指したままだと、一覧の先頭（「人が置く」）で固まって見える
-        fusekiId: fusekiIds.includes(base.fusekiId) ? base.fusekiId : BUILTIN_ID,
+        fusekiId: fusekiIds.includes(base.fusekiId) ? base.fusekiId : defFuseki,
       };
       return `
         <fieldset class="seat" data-seat="${i}">
@@ -116,14 +101,9 @@ export class NewGameDialog {
             </select></label>
             <label class="fuseki-only">${t('ng_fuseki_label')}<select name="fuseki${i}">
               <option value="${HUMAN_ID}" ${eng.fusekiId === HUMAN_ID ? 'selected' : ''}>${t('ng_placed_by_person')}</option>
-              <option value="${BUILTIN_ID}" ${eng.fusekiId === BUILTIN_ID ? 'selected' : ''}>${t('ng_builtin_policy')}</option>
-              ${s.modelSets.map((m) => `<option value="${m.id}" ${eng.fusekiId === m.id ? 'selected' : ''}>${esc(t('ng_builtin_models', { name: m.name }))}</option>`).join('')}
               ${fusekis.map((e) => `<option value="${e.id}" ${eng.fusekiId === e.id ? 'selected' : ''}>${esc(e.name || e.path)}</option>`).join('')}
             </select></label>
-            <div class="form-row two">
-              <label class="fuseki-only" title="${t('ng_strength_title')}">${t('ng_strength')}<select name="level${i}">${LEVELS.map((lv) => `<option value="${lv.level}" ${eng.level === lv.level ? 'selected' : ''}>${levelLabel(lv.level)}</option>`).join('')}</select></label>
-              <label>${t('ng_sec_per_move')}<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
-            </div>
+            <label>${t('ng_sec_per_move')}<input name="sec${i}" type="number" min="1" max="600" value="${eng.secPerMove}" /></label>
           </div>
         </fieldset>`;
     };
@@ -179,8 +159,7 @@ export class NewGameDialog {
         return {
           type: 'engine',
           normalId: str(`normal${i}`),
-          fusekiId: str(`fuseki${i}`) || BUILTIN_ID,
-          level: Math.min(5, Math.max(1, Number(fd.get(`level${i}`)) || 4)),
+          fusekiId: str(`fuseki${i}`) || HUMAN_ID,
           secPerMove: Math.min(600, Math.max(1, Number(fd.get(`sec${i}`)) || 3)),
         };
       };

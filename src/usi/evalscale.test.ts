@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpToP, pToCp, recipeFor, presetOf, evalFromDeclaration, EVAL_PRESETS } from './evalscale.ts';
 import { readySecOf, usesGpu, GPU_READY_SEC, READY_SEC } from './engine.ts';
-import { merge } from '../settings.ts';
+import { fusekiEngine, merge } from '../settings.ts';
 import type { UsiOption } from './parse.ts';
 
 test('cp と勝率の往復（エンジンごとの目盛り）', () => {
@@ -83,38 +83,29 @@ test('以前の設定（threads/hashMb/evalDir と全体の winrate）を option
   assert.deepEqual(e.options, { BookFile: 'no_book', Threads: '8', USI_Hash: '512', MultiPV: '5', EvalDir: '/x/eval' });
   assert.deepEqual(e.eval, { scale: 435, offsetCp: 34 });
   assert.equal(s.normalEngineId, 'a');
-  assert.equal(s.fusekiEngineId, 'builtin');
+  assert.equal(s.fusekiEngineId, undefined);
   assert.deepEqual(s.analysisSlots, ['auto']);
 });
 
 test('消えたエンジンを指す既定は捨てる', () => {
   const s = merge({ engines: [], normalEngineId: 'gone', fusekiEngineId: 'gone', analysisSlots: ['gone'] });
   assert.equal(s.normalEngineId, undefined);
-  assert.equal(s.fusekiEngineId, 'builtin');
+  assert.equal(s.fusekiEngineId, undefined);
 });
 
-test('足した模型一式（世代）は id とフォルダで守り、既定に選べる', () => {
-  const s = merge({
-    modelSets: [
-      { id: 'builtin:a', name: 'iter2455', dir: '/m/iter2455' },
-      // フォルダの無いものは登録として意味が無い（次の起動で必ず失敗する）
-      { id: 'builtin:b', name: '壊れ' },
-      // id が重なるものは後から来たほうを落とす（席の指す先が二重になる）
-      { id: 'builtin:a', name: '同じ id', dir: '/m/other' },
-      // 'builtin' そのものは同梱の席なので奪わせない
-      { id: 'builtin', name: '同梱を装う', dir: '/m/fake' },
-    ] as never,
-    fusekiEngineId: 'builtin:a',
-  });
-  // 残すのは実在するフォルダぶん。id が壊れていても付け直して残す（登録は消さない）
-  assert.deepEqual(s.modelSets.map((m) => m.dir), ['/m/iter2455', '/m/other', '/m/fake']);
-  assert.equal(s.modelSets[0]!.id, 'builtin:a');
-  assert.equal(new Set(s.modelSets.map((m) => m.id)).size, 3, 'id は重ならない');
-  for (const m of s.modelSets) assert.match(m.id, /^builtin:/);
-  assert.equal(s.fusekiEngineId, 'builtin:a', '足した世代は布石の既定に選べる');
+test('前の版の内蔵の布石評価（廃止）を指す既定は捨て、布石対応のエンジンへ寄せる', () => {
+  const libra = { id: 'L', name: 'Libra', path: 'C:/libra.exe', kind: 'fuseki' as const, options: {}, eval: { scale: 600, offsetCp: 0 } };
+  const yane = { id: 'Y', name: 'YaneuraOu', path: 'C:/yane.exe', kind: 'normal' as const, options: {}, eval: { scale: 600, offsetCp: 0 } };
+  for (const old of ['builtin', 'builtin:a', 'Y']) {
+    const s = merge({ engines: [yane, libra], fusekiEngineId: old, modelSets: [{ id: 'builtin:a', name: 'x', dir: '/m' }] } as never);
+    assert.equal(s.fusekiEngineId, undefined, old);
+    assert.equal(fusekiEngine(s)?.id, 'L', old);
+    assert.equal('modelSets' in s, false, '模型一式の登録は持ち越さない');
+  }
 });
 
-test('消えた模型一式を指す既定は同梱へ戻す', () => {
-  const s = merge({ modelSets: [], fusekiEngineId: 'builtin:gone' });
-  assert.equal(s.fusekiEngineId, 'builtin');
+test('自動で入れた Libra の記録は、その登録が残っているときだけ持ち越す', () => {
+  const libra = { id: 'L', name: 'Libra', path: 'C:/libra.exe', kind: 'fuseki' as const, options: {}, eval: { scale: 600, offsetCp: 0 } };
+  assert.deepEqual(merge({ engines: [libra], libra: { tag: 'v0.3', engineId: 'L' } }).libra, { tag: 'v0.3', engineId: 'L' });
+  assert.equal(merge({ engines: [], libra: { tag: 'v0.3', engineId: 'L' } }).libra, undefined);
 });

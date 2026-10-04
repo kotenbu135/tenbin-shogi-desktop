@@ -62,12 +62,9 @@ glob 頼みで、一致 0 件でも成功で終わっていた＝何も検査せ
 ```bash
 npm run build && npm run preview          # http://localhost:4173
 node scripts/smoke-preview.mjs /tmp       # 両玉→布石→本将棋→待った
-node scripts/smoke-builtin.mjs /tmp       # 内蔵の布石評価・複数枠の検討・内蔵同士の自動対局
-node scripts/smoke-review.mjs /tmp        # 割りつけ・対局の枠・2 種のグラフ・終局後の検討・棋譜解析
 node scripts/smoke-en.mjs                # 英語表示（日本語の残りが無いか・KIF は日本語のまま・切り替え）
 WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9222 npm run tauri dev   # 別の端末で
 node scripts/drive-app.mjs /tmp           # 動いているアプリを操作する（Linux/WebKitGTK 向け）
-node scripts/drive-engines.mjs /tmp <エンジン>
 ```
 
 ## WSL / Ubuntu で開発する
