@@ -190,8 +190,8 @@ const DICT = {
     en: 'Game analysis: {n} positions evaluated in {sec} s',
   },
   msg_editor_hint: {
-    ja: '局面編集中。駒を置いて「この局面から本将棋を始める」を押します',
-    en: 'Editing the position. Place the pieces, then press “Start shogi from this position”',
+    ja: '局面編集中。駒台の駒を押してからマスを押すと置けます。盤の駒は押して別のマスや駒台・駒箱へ、同じマスをもう一度押すと成り・向きが変わります',
+    en: 'Editing the position. Press a piece on a stand, then a square, to place it. Press a board piece, then another square, a stand or the piece box to move it; pressing its square again promotes or turns it',
   },
   msg_no_normal_kif: {
     ja: '本将棋がまだ始まっていないので、本将棋だけの棋譜は作れません',
@@ -220,24 +220,6 @@ const DICT = {
   },
   msg_boot_failed: { ja: '起動できない: {msg}', en: 'Cannot start: {msg}' },
   msg_unexpected: { ja: '思わぬ失敗: {msg}', en: 'Unexpected failure: {msg}' },
-  msg_builtin_loaded: {
-    ja: '内蔵の布石評価: 方策 {policy} / 価値ネット {value}{kings}',
-    en: 'Built-in placement evaluator: policy {policy} / value net {value}{kings}',
-  },
-  msg_builtin_kings: { ja: ' / 両玉の価値表', en: ' / king-pair table' },
-  msg_builtin_failed: { ja: '内蔵の布石評価を読めない: {msg}', en: 'Cannot load the built-in placement evaluator: {msg}' },
-  msg_models_loaded: {
-    ja: '布石の模型 {name}（{dir}）: 方策 {policy} / 価値ネット {value}{kings}',
-    en: 'Placement models {name} ({dir}): policy {policy} / value net {value}{kings}',
-  },
-  msg_models_no_kings: {
-    ja: '布石の模型 {name}: 両玉の価値表を使えない（{msg}）。天秤将棋の 1〜2 手目は価値ネットで代用する',
-    en: 'Placement models {name}: the king-pair table is unusable ({msg}); the first two moves of Balance Shogi fall back to the value net',
-  },
-  msg_models_failed: {
-    ja: '布石の模型 {name}（{dir}）を読めない: {msg}',
-    en: 'Cannot load placement models {name} ({dir}): {msg}',
-  },
 
   // ---- 棋譜の欄 ----
   kifu_title: { ja: '棋譜', en: 'Record' },
@@ -354,14 +336,6 @@ const DICT = {
   ng_played_by_person: { ja: '人が指す', en: 'Played by a person' },
   ng_fuseki_label: { ja: '布石（40手）', en: 'Placement (40 moves)' },
   ng_placed_by_person: { ja: '人が置く', en: 'Placed by a person' },
-  ng_builtin_policy: { ja: '内蔵の方策', en: 'Built-in policy' },
-  ng_builtin_models: { ja: '内蔵の方策（{name}）', en: 'Built-in policy ({name})' },
-  ng_strength: { ja: '強さ', en: 'Strength' },
-  ng_strength_title: {
-    ja: '内蔵の方策の温度。1 は気まぐれ、5 は価値ネットで最善を選ぶ',
-    en: 'Temperature of the built-in policy. 1 wanders, 5 picks the value net’s best',
-  },
-  ng_level1: { ja: '1 · 気まぐれ', en: '1 · wandering' },
   ng_sec_per_move: { ja: '1手の秒数', en: 'Seconds per move' },
   ng_main_min: { ja: '持ち時間（分）', en: 'Main time (minutes)' },
   ng_byoyomi_sec: { ja: '秒読み（秒）', en: 'Byoyomi (seconds)' },
@@ -373,19 +347,14 @@ const DICT = {
 
   // ---- 局面編集 ----
   ed_title: { ja: '局面編集', en: 'Edit position' },
-  ed_hint: {
-    ja: '駒を選んでマスへ。盤の駒を押すと手に持ち、もう一度同じマスを押すと成・不成が切り替わります。',
-    en: 'Pick a piece, then a square. Pressing a piece on the board picks it up; pressing the same square again toggles promotion.',
-  },
-  ed_side_sente: { ja: '☗先手', en: '☗ Sente' },
-  ed_side_gote: { ja: '☖後手', en: '☖ Gote' },
-  ed_piece_title: { ja: '{side}の{role}', en: '{side} {role}' },
-  ed_erase: { ja: '消す', en: 'Erase' },
-  ed_holding: { ja: '手に持っている駒: {mark}{role}', en: 'Holding: {mark}{role}' },
-  ed_erase_hint: { ja: '消す: 押したマスの駒を取り除きます', en: 'Erase: pressing a square removes the piece on it' },
   ed_turn: { ja: '手番', en: 'To move' },
+  ed_turn_sente: { ja: '☗先手番', en: '☗ Sente to move' },
+  ed_turn_gote: { ja: '☖後手番', en: '☖ Gote to move' },
+  ed_box: { ja: '駒箱', en: 'Piece box' },
+  ed_box_piece: { ja: '駒箱の{role}（{n}枚）', en: '{role} in the piece box ({n})' },
   ed_hirate: { ja: '平手の初期配置', en: 'Standard starting position' },
-  ed_clear: { ja: '盤を空にする', en: 'Clear the board' },
+  ed_to_hands: { ja: '盤の駒を駒台へ', en: 'Board pieces to the stands' },
+  ed_reset: { ja: '最初から', en: 'Start over' },
   ed_start: { ja: 'この局面から本将棋を始める', en: 'Start shogi from this position' },
   ed_need_kings: { ja: '玉は先手・後手に1枚ずつ置いてください', en: 'Place exactly one king for each side' },
   ed_bad_position: { ja: '局面として成り立ちません: {msg}', en: 'Not a valid position: {msg}' },
@@ -410,9 +379,7 @@ const DICT = {
   pl_starting: { ja: '{name} を起動しています…', en: 'Starting {name}…' },
   pl_starting_note: { ja: '{name}: {text}', en: '{name}: {text}' },
   pl_declare_win: { ja: '{name} が入玉宣言をしました', en: '{name} declared an entering-king win' },
-  pl_builtin_missing: { ja: '内蔵の布石評価が読み込まれていない', en: 'The built-in placement evaluator is not loaded' },
-  pl_builtin_label: { ja: '内蔵の布石評価', en: 'Built-in placement evaluator' },
-  pl_builtin_no_move: { ja: '候補を出せない: {msg}', en: 'No candidate move: {msg}' },
+  pl_no_king_square: { ja: '玉を置けるマスがありません', en: 'There is no square to place the king' },
 
   // ---- USI エンジン ----
   eng_tauri_only: {
@@ -551,32 +518,6 @@ const DICT = {
   cuda_dismiss: { ja: '今後表示しない', en: 'Don’t show again' },
 
   // ---- 内蔵の布石評価 ----
-  bi_name: { ja: '内蔵の布石評価', en: 'Built-in placement evaluator' },
-  bi_table_format: { ja: '両玉の価値表の形式が違う: {format}', en: 'Wrong king-pair table format: {format}' },
-  bi_table_fields: { ja: '両玉の価値表に pairs / band が無い', en: 'The king-pair table has no pairs / band' },
-  bi_table_gen: {
-    ja: '両玉の価値表（{table}）と布石ネット（{model}）の世代が違う',
-    en: 'The king-pair table ({table}) and the placement net ({model}) are from different generations',
-  },
-  bi_table_unreadable: {
-    ja: '両玉の価値表を読めない。天秤将棋の 1〜2 手目は価値ネットで代用する',
-    en: 'Cannot read the king-pair table; the first two moves of Balance Shogi fall back to the value net',
-  },
-  bi_models_unreadable: { ja: 'モデルの一覧を読めない: {status} {url}', en: 'Cannot read the model list: {status} {url}' },
-  bi_models_format: { ja: 'モデルの一覧の形式が違う: {format}', en: 'Wrong model-list format: {format}' },
-  bi_bad_filename: {
-    ja: 'モデルの一覧のファイル名が同じフォルダの中を指していない: {file}',
-    en: 'The model list names a file outside its own folder: {file}',
-  },
-  bi_policy: { ja: '方策', en: 'the policy net' },
-  bi_value: { ja: '価値ネット', en: 'the value net' },
-  bi_missing_input: { ja: '{what}の ONNX に入力 {name} が無い', en: 'The ONNX for {what} has no input {name}' },
-  bi_missing_policy_out: { ja: '方策の ONNX に output_policy が無い', en: 'The policy ONNX has no output_policy' },
-  bi_missing_value_out: { ja: '価値ネットの ONNX に output_value が無い', en: 'The value-net ONNX has no output_value' },
-  bi_no_usi: { ja: '内蔵の評価は USI の行を受けない: {line}', en: 'The built-in evaluator takes no USI lines: {line}' },
-  bi_not_ready: { ja: '内蔵の評価が準備できていない', en: 'The built-in evaluator is not ready' },
-  bi_fuseki_only: { ja: '内蔵の評価は布石の局面だけを受ける', en: 'The built-in evaluator only takes placement positions' },
-  bi_no_legal: { ja: '布石で合法手が無い', en: 'No legal placement' },
 
   // ---- 勝率の目盛り ----
   ep_generic_label: { ja: '一般（600 / 0）', en: 'Generic (600 / 0)' },
@@ -632,6 +573,8 @@ const DICT = {
     en: 'Nothing registered yet. Placement uses the built-in evaluator, but analysis and play from move 41 need an engine.',
   },
   en_kind_fuseki: { ja: '布石にも対応', en: 'Placement too' },
+  en_libra_auto: { ja: '自動で入れた {tag}', en: 'Auto-installed {tag}' },
+  en_libra_unsupported: { ja: 'サポート終了（Libra 0.2 以前）', en: 'Unsupported (Libra 0.2 or older)' },
   en_gpu_badge: { ja: 'GPU', en: 'GPU' },
   en_kind_normal: { ja: '本将棋', en: 'Shogi' },
   en_default_normal: { ja: '本将棋の既定', en: 'Default for shogi' },
@@ -650,25 +593,6 @@ const DICT = {
   en_dup: { ja: '複製', en: 'Duplicate' },
   en_dup_suffix: { ja: '{name}（複製）', en: '{name} (copy)' },
   en_make_default_fuseki: { ja: '布石の既定にする', en: 'Make it the placement default' },
-  en_models_title: { ja: '布石の模型（世代）', en: 'Placement models (generations)' },
-  en_models_intro: {
-    ja: '同梱の模型のほかに、書き出した世代のフォルダ（models.json と 3 つの重み）を足せる。足した世代は席と検討の欄で選べるので、世代どうしを戦わせられる。',
-    en: 'Besides the bundled models you can add a folder holding an exported generation (models.json and the three weight files). Added generations can be picked per seat and per analysis pane, so generations can play each other.',
-  },
-  en_models_add: { ja: 'フォルダを足す…', en: 'Add a folder…' },
-  en_models_bundled: { ja: '同梱', en: 'Bundled' },
-  en_models_bundled_path: { ja: 'アプリに同梱', en: 'Shipped with the app' },
-  en_models_broken: { ja: '読めない', en: 'Unreadable' },
-  en_models_no_kings: { ja: '両玉の表なし', en: 'No king-pair table' },
-  en_models_pick: { ja: 'models.json のあるフォルダ', en: 'Folder holding models.json' },
-  en_models_loading: { ja: '布石の模型を読んでいる: {dir}', en: 'Loading placement models: {dir}' },
-  en_models_add_failed: { ja: '足せない: {msg}', en: 'Cannot add: {msg}' },
-  en_models_dup: { ja: 'そのフォルダはもう足してある', en: 'That folder is already added' },
-  en_models_failed: { ja: '模型を読めない', en: 'Cannot load the models' },
-  en_models_tauri_only: {
-    ja: 'フォルダの差し替えはアプリでだけ使える（ブラウザのプレビューでは同梱のみ）',
-    en: 'Swapping folders works only in the app (the browser preview has the bundled models only)',
-  },
   en_make_default_normal: { ja: '本将棋の既定にする', en: 'Make it the shogi default' },
   en_remove: { ja: '削除', en: 'Remove' },
   en_remove_confirm: { ja: '「{name}」を削除しますか', en: 'Remove “{name}”?' },
@@ -738,12 +662,19 @@ const DICT = {
   su_title: { ja: 'はじめに', en: 'Getting started' },
   su_version: { ja: '版 {version}', en: 'Version {version}' },
   su_intro: {
-    ja: '布石（1〜40手目）はアプリの中の評価で動きます。<b>41手目からの本将棋にはエンジンが要ります。</b>',
-    en: 'Placement (moves 1–40) runs on the evaluator inside the app. <b>Shogi from move 41 needs an engine.</b>',
+    ja: '布石（1〜40手目）も41手目からの本将棋も、天秤将棋の AI「Libra」が指します。<b>Libra は起動のたびに最新のリリースを確かめ、自動で入れて既定にします。</b>',
+    en: 'Both placement (moves 1–40) and shogi from move 41 are played by Libra, the Balance Shogi AI. <b>On every start the app checks for the latest Libra release and installs it as the default.</b>',
   },
+  su_libra: { ja: 'Libra を確かめる', en: 'Check Libra' },
+  su_libra_hint: {
+    ja: 'LibraShogi の GitHub の最新のリリース（約 55MB）を取って、布石と本将棋の既定にします',
+    en: 'Downloads the latest LibraShogi release from GitHub (about 55 MB) and makes it the default for placement and shogi',
+  },
+  su_libra_have: { ja: 'いま入っているのは Libra {tag} です', en: 'Libra {tag} is installed' },
+  su_others_head: { ja: 'ほかのエンジン', en: 'Other engines' },
   su_none_yet: { ja: 'まだ 1 本も登録されていません。', en: 'None registered yet.' },
   su_count: { ja: 'いま {n} 本登録されています。', en: '{n} registered right now.' },
-  su_install: { ja: 'エンジンを自動で入れる', en: 'Install an engine automatically' },
+  su_install: { ja: 'やねうら王＋水匠5 を入れる', en: 'Install YaneuraOu + Suisho5' },
   su_install_hint: {
     ja: 'やねうら王＋水匠5 を公式の配布先から取って登録します（約 40MB）',
     en: 'Downloads YaneuraOu + Suisho5 from their official releases and registers them (about 40 MB)',
@@ -781,6 +712,11 @@ const DICT = {
   su_note_percent: { ja: '{text}（{percent}%）', en: '{text} ({percent}%)' },
   su_installed_but_failed: { ja: '入れましたが、起動できませんでした: {msg}', en: 'Installed, but it would not start: {msg}' },
   su_installed: { ja: '入りました。{name} を本将棋の既定にしました', en: 'Installed. {name} is now the default for shogi' },
+  lb_checking: { ja: '最新の Libra を確かめています…', en: 'Checking for the latest Libra…' },
+  lb_installed: { ja: '{name} を入れて、布石と本将棋の既定にしました', en: 'Installed {name} and made it the default for placement and shogi' },
+  lb_adopted: { ja: '登録してある {name} を、布石と本将棋の既定にしました', en: 'Made the registered {name} the default for placement and shogi' },
+  lb_current: { ja: 'Libra は最新です（{tag}）', en: 'Libra is up to date ({tag})' },
+  lb_failed: { ja: '最新の Libra を取ってこられません: {msg}', en: 'Cannot fetch the latest Libra: {msg}' },
   su_say_failed: { ja: 'エンジンを入れましたが起動できません: {msg}', en: 'The engine was installed but will not start: {msg}' },
   su_say_installed: { ja: '{name} を入れました', en: 'Installed {name}' },
   su_install_failed: {
@@ -842,24 +778,23 @@ const DICT = {
   an_stop_btn: { ja: '止める', en: 'Stop' },
   an_register_engine: { ja: 'エンジンを登録する', en: 'Register an engine' },
   an_need_engine: {
-    ja: '布石は内蔵の評価で検討できます。41 手目以降には USI エンジンが要ります。',
-    en: 'Placement can be analysed with the built-in evaluator. From move 41 you need a USI engine.',
+    ja: '検討にはエンジンが要ります。Libra は起動のときに自動で入ります。',
+    en: 'Analysis needs an engine. Libra is installed automatically on start.',
   },
-  an_auto: { ja: '自動（布石は内蔵、41手目から既定のエンジン）', en: 'Automatic (built-in for placement, the default engine from move 41)' },
+  an_auto: { ja: '自動（布石と41手目からの既定のエンジン）', en: 'Automatic (the default engines for placement and from move 41)' },
   an_cannot_choose: { ja: '先手か後手かを選ぶと検討できます。', en: 'Pick Sente or Gote and the analysis can start.' },
   an_cannot_fuseki: {
-    ja: '布石中はこのエンジンでは評価できません。布石対応のエンジンか内蔵の評価を選んでください。',
-    en: 'This engine cannot evaluate placement. Pick a placement-capable engine, or the built-in evaluator.',
-  },
-  an_cannot_normal: {
-    ja: '内蔵の評価は布石だけです。41 手目からは本将棋のエンジンを使います。',
-    en: 'The built-in evaluator only handles placement. From move 41, use a shogi engine.',
+    ja: '布石中はこのエンジンでは評価できません。布石対応のエンジン（Libra など）を選んでください。',
+    en: 'This engine cannot evaluate placement. Pick a placement-capable engine such as Libra.',
   },
   an_no_normal_engine: {
     ja: '41 手目以降の既定エンジンがありません。エンジンを登録してください。',
     en: 'There is no default engine for move 41 onward. Register one.',
   },
-  an_no_fuseki_engine: { ja: '布石を検討するものがありません。', en: 'Nothing available to analyse the placement.' },
+  an_no_fuseki_engine: {
+    ja: '布石を検討できるエンジン（Libra）がありません。「はじめに」から入れられます。',
+    en: 'There is no engine that can analyse the placement (Libra). Install it from Getting started.',
+  },
 
   // ---- 布石の wasm ----
   fk_feature_shape: {

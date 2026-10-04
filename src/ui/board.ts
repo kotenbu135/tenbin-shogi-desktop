@@ -21,7 +21,8 @@ export interface BoardCallbacks {
   onMove(from: string, to: string): void;
   /** 局面編集中のクリック */
   onEditSquare?(square: string): void;
-  onEditHand?(color: Color, role: OpsRole): void;
+  /** 局面編集中に駒台を押した。role は押した駒（駒台の空いたところなら null） */
+  onEditHand?(color: Color, role: OpsRole | null): void;
 }
 
 /** 検討の候補などを盤に描く形。from が無ければ駒打ち（行き先に輪） */
@@ -42,8 +43,8 @@ export interface RenderOptions {
   /** 名札の名前。省略時は 先手／後手 */
   names?: Partial<Record<Color, string>>;
   clocks?: Record<Color, ClockView | null>;
-  /** 局面編集。すべてのマスと駒台を押せる。selected は手に持っている駒の元のマス */
-  edit?: { selected?: string | null };
+  /** 局面編集。すべてのマスと駒台を押せる。selected は手に持っている盤の駒の元のマス、selectedHand は駒台の駒 */
+  edit?: { selected?: string | null; selectedHand?: { color: Color; role: OpsRole } | null };
 }
 
 type Selection = { kind: 'hand'; color: Color; role: OpsRole } | { kind: 'square'; square: string } | null;
@@ -90,7 +91,12 @@ export class Board {
   private readonly filesEl: HTMLElement;
   private readonly ranksEl: HTMLElement;
 
-  constructor(private readonly root: HTMLElement, private readonly cb: BoardCallbacks) {
+  private readonly root: HTMLElement;
+  private readonly cb: BoardCallbacks;
+
+  constructor(root: HTMLElement, cb: BoardCallbacks) {
+    this.root = root;
+    this.cb = cb;
     root.classList.add('shogi');
     root.innerHTML = `
       <div class="stand far">
@@ -118,6 +124,11 @@ export class Board {
     for (const el of [this.standFar, this.standNear]) {
       el.addEventListener('click', (e) => {
         const t = (e.target as HTMLElement).closest<HTMLElement>('.slot');
+        // 局面編集では駒台の空いたところも押せる（手に持った駒を、駒の無い駒台へ置く）
+        if (this.options?.edit && (!t || t.hasAttribute('disabled'))) {
+          this.cb.onEditHand?.(el.dataset.color as Color, null);
+          return;
+        }
         if (!t || !t.dataset.role) return;
         this.clickHand(el.dataset.color as Color, t.dataset.role as OpsRole);
       });
@@ -251,7 +262,8 @@ export class Board {
     const el = this.standFor(color);
     el.replaceChildren();
     const hand = s.hands[color];
-    const withKing = !o.edit && o.phase !== 'normal' && o.phase !== 'over';
+    // 局面編集では玉も駒台に載る（空の盤から始めるので、40 枚が両方の駒台にある）
+    const withKing = !!o.edit || (o.phase !== 'normal' && o.phase !== 'over');
     const base = withKing ? STAND_ORDER : STAND_ORDER_NO_KING;
     const near = color === this.orientation;
     const order = near ? base : [...base].reverse();
@@ -259,9 +271,8 @@ export class Board {
     for (const role of order) {
       const n = hand.get(role) ?? 0;
       // 持っていない駒は駒台に出さない（実際の駒台と同じ）。
-      // 局面編集だけは全種類を並べる（無い駒を盤へ置くための台なので）。
       // 布石のあいだは 20 枚を持っているので、置けない駒も薄くせずそのまま出す（押せないだけ）
-      if (!o.edit && n === 0) continue;
+      if (n === 0) continue;
       const slot = document.createElement('button');
       slot.type = 'button';
       slot.className = 'slot';
@@ -269,10 +280,11 @@ export class Board {
       slot.dataset.n = String(n);
       // 両玉を置く間に置けるのは玉だけ。押せなくするが、薄くはしない
       slot.disabled = o.edit ? false : !o.interactive || !toMove || (o.phase === 'kings' && role !== 'king');
-      slot.classList.toggle('selected', this.selection?.kind === 'hand' && this.selection.color === color && this.selection.role === role);
+      const held = o.edit ? o.edit.selectedHand : this.selection?.kind === 'hand' ? this.selection : null;
+      slot.classList.toggle('selected', !!held && held.color === color && held.role === role);
       slot.appendChild(pieceEl({ color, role }, this.orientation));
-      // 枚数は 2 枚以上のときに出す。局面編集では 0 枚も出す（薄くする代わりに数で示す）
-      if (n >= 2 || (o.edit && n !== 1)) {
+      // 枚数は 2 枚以上のときに出す
+      if (n >= 2) {
         const c = document.createElement('span');
         c.className = 'count';
         c.textContent = String(n);

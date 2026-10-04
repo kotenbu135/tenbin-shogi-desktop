@@ -10,6 +10,7 @@ import { isTauri } from '../usi/engine.ts';
 import type { Settings } from '../settings.ts';
 import type { InstallSpec } from './engines.ts';
 import { checkUpdate, currentVersion } from './update.ts';
+import { LibraUpdater } from './libra.ts';
 
 /** 自動で入れるもの（やねうら王の実行ファイル ＋ 水匠5 の評価関数） */
 const AUTO_NAME = 'やねうら王＋水匠5';
@@ -34,6 +35,10 @@ export interface SetupDeps {
   say(text: string, error?: boolean): void;
   /** 更新を入れ替える直前にエンジンを止める */
   beforeInstall(): Promise<void>;
+  /** Libra（天秤将棋の AI）の取り込み。起動のときに自動で走るものと同じ */
+  libra: LibraUpdater;
+  /** Libra を入れた・既定にしたあと（一覧を描き直す） */
+  onLibraChanged(): void;
 }
 
 async function reveal(path: string): Promise<void> {
@@ -49,6 +54,7 @@ export class SetupDialog {
   private version = '';
   private installing = false;
   private lastNote = '';
+  private libraNote = '';
 
   constructor(host: HTMLElement, private readonly deps: SetupDeps) {
     this.dialog = document.createElement('dialog');
@@ -66,6 +72,9 @@ export class SetupDialog {
           break;
         case 'install-gpu':
           void this.install(true);
+          break;
+        case 'libra':
+          void this.installLibra();
           break;
         case 'engines':
           this.dialog.close();
@@ -92,6 +101,30 @@ export class SetupDialog {
     this.lastNote = percent === undefined ? text : t('su_note_percent', { text, percent });
     const el = this.dialog.querySelector('.install-note');
     if (el) el.textContent = this.lastNote;
+  }
+
+  /** Libra の進み具合。起動のときの自動の取り込みからも呼ばれる（開いていれば欄に出す） */
+  setLibraNote(text: string, percent?: number): void {
+    this.libraNote = percent === undefined ? text : t('su_note_percent', { text, percent });
+    const el = this.dialog.querySelector('.libra-note');
+    if (el) el.textContent = this.libraNote;
+  }
+
+  /** 最新の Libra を確かめて、要れば入れる（ボタン） */
+  private async installLibra(): Promise<void> {
+    const b = this.dialog.querySelector<HTMLButtonElement>('[data-act="libra"]');
+    if (b) b.disabled = true;
+    try {
+      const o = await this.deps.libra.ensureLatest((text, pct) => this.setLibraNote(text, pct));
+      const m = LibraUpdater.message(o, true);
+      this.setLibraNote(m?.text ?? '');
+      if (m) this.deps.say(m.text, m.error);
+      this.deps.onLibraChanged();
+      this.paint();
+    } finally {
+      const b2 = this.dialog.querySelector<HTMLButtonElement>('[data-act="libra"]');
+      if (b2) b2.disabled = false;
+    }
   }
 
   /**
@@ -123,7 +156,7 @@ export class SetupDialog {
             const r = await invoke<{ exe: string; model: string }>('install_gpu_engine');
             return { path: r.exe, name: GPU_NAME, eval: GPU_EVAL, options: { DNN_Model: r.model }, makeDefault: 'if-none' as const };
           })()
-        : { path: await invoke<string>('install_recommended_engine'), name: AUTO_NAME, eval: AUTO_EVAL, makeDefault: 'always' as const };
+        : { path: await invoke<string>('install_recommended_engine'), name: AUTO_NAME, eval: AUTO_EVAL, makeDefault: 'if-none' as const };
       this.note(t('su_registering'), 100);
       const err = await this.deps.register(spec);
       // 既定にしたかどうかは登録のあとの設定を見る（GPU のほうは、既定が無いときだけ既定になる）
@@ -152,6 +185,7 @@ export class SetupDialog {
 
   private paint(): void {
     const n = this.deps.settings().engines.length;
+    const libra = this.deps.settings().libra;
     const dir = (label: string, path: string) =>
       `<div class="dir-row"><span class="dir-label">${label}</span><code class="dir-path">${path || t('su_dir_unknown')}</code>${
         path ? `<button type="button" data-act="open-dir" data-dir="${path}">${t('su_open')}</button>` : ''
@@ -166,7 +200,16 @@ export class SetupDialog {
 
         <section class="setup-step">
           <div class="setup-actions">
-            <button type="button" class="primary" data-act="install">${t('su_install')}</button>
+            <button type="button" class="primary" data-act="libra" ${this.deps.libra.busy ? 'disabled' : ''}>${t('su_libra')}</button>
+            <span class="hint">${libra ? t('su_libra_have', { tag: libra.tag }) : t('su_libra_hint')}</span>
+          </div>
+          <div class="install-note libra-note">${escapeHtml(this.libraNote)}</div>
+        </section>
+
+        <section class="setup-step">
+          <h3>${t('su_others_head')}</h3>
+          <div class="setup-actions">
+            <button type="button" data-act="install">${t('su_install')}</button>
             <span class="hint">${t('su_install_hint')}</span>
           </div>
           <div class="setup-actions">

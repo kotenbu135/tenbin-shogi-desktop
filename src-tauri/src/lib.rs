@@ -429,6 +429,197 @@ async fn install_gpu_engine(app: AppHandle) -> Result<InstalledEngine, String> {
     })
 }
 
+/// 天秤将棋の AI「Libra」の最新のリリース（GitHub の API）。Windows 版の zip を取ってきて登録する。
+const LIBRA_LATEST_API: &str = "https://api.github.com/repos/kotenbu135/LibraShogi/releases/latest";
+/// 取ってよい場所。API の答えに別の場所が書かれていても取りに行かない
+const LIBRA_DOWNLOAD_PREFIX: &str = "https://github.com/kotenbu135/LibraShogi/releases/download/";
+const LIBRA_EXE: &str = "libra.exe";
+
+/// Libra のリリースのうち、取り込むもの（Windows 版の zip）
+#[derive(Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+struct LibraRelease {
+    /// タグ（v0.3 など）
+    tag: String,
+    /// zip の名前
+    name: String,
+    url: String,
+    sha256: String,
+    size: u64,
+}
+
+fn is_libra_zip(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("libra-v") && n.ends_with("-windows-x64.zip")
+}
+
+/// タグはフォルダの名前に使う。区切りや `..` を含むものは受けない
+fn safe_tag(tag: &str) -> bool {
+    !tag.is_empty() && tag != "." && tag != ".." && tag.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+/// `SHA256SUMS`（`<hex>  <name>` の行）から、その名前の SHA-256 を引く
+fn sha_from_sums(sums: &str, name: &str) -> Option<String> {
+    sums.lines().find_map(|l| {
+        let mut it = l.split_whitespace();
+        let (h, n) = (it.next()?, it.next()?);
+        (n.trim_start_matches('*') == name && h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit())).then(|| h.to_ascii_lowercase())
+    })
+}
+
+/// API の答え（releases/latest）から Windows 版の zip を選ぶ。SHA-256 は添付の `digest`（`sha256:…`）、
+/// 無ければ `SHA256SUMS` の中身（`sums`）から引く。どちらも無ければ取りに行かない（中身を照合できないため）
+fn pick_libra_release(v: &serde_json::Value, sums: Option<&str>) -> Result<LibraRelease, String> {
+    let tag = v["tag_name"].as_str().ok_or("リリースのタグが無い")?.to_string();
+    if !safe_tag(&tag) {
+        return Err(format!("リリースのタグが読めない: {tag}"));
+    }
+    let assets = v["assets"].as_array().ok_or("リリースの添付が無い")?;
+    let a = assets
+        .iter()
+        .find(|a| a["name"].as_str().is_some_and(is_libra_zip))
+        .ok_or_else(|| format!("{tag} に Windows 版の zip が無い"))?;
+    let name = a["name"].as_str().unwrap_or_default().to_string();
+    let url = a["browser_download_url"].as_str().unwrap_or_default().to_string();
+    if !url.starts_with(LIBRA_DOWNLOAD_PREFIX) {
+        return Err(format!("取りに行く場所が違う: {url}"));
+    }
+    let sha256 = a["digest"]
+        .as_str()
+        .and_then(|d| d.strip_prefix("sha256:"))
+        .map(|h| h.to_ascii_lowercase())
+        .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
+        .or_else(|| sums.and_then(|s| sha_from_sums(s, &name)))
+        .ok_or_else(|| format!("{name} の SHA-256 が分からない"))?;
+    Ok(LibraRelease { tag, name, url, sha256, size: a["size"].as_u64().unwrap_or(0) })
+}
+
+fn http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(60))
+        // GitHub の API は User-Agent の無い問い合わせを断る
+        .user_agent(concat!("tenbin-shogi-gui/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| format!("取りに行く用意ができない: {e}"))
+}
+
+async fn get_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("問い合わせられない: {url} ({e})"))?
+        .error_for_status()
+        .map_err(|e| format!("答えが無い: {url} ({e})"))?
+        .text()
+        .await
+        .map_err(|e| format!("読めない: {url} ({e})"))
+}
+
+/// 最新の Libra のリリース（Windows 版の zip）を調べる。取りには行かない
+#[tauri::command]
+async fn libra_latest() -> Result<LibraRelease, String> {
+    let client = http_client()?;
+    let body = get_text(&client, LIBRA_LATEST_API).await?;
+    let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| format!("リリースの答えが読めない: {e}"))?;
+    match pick_libra_release(&v, None) {
+        Ok(r) => Ok(r),
+        Err(first) => {
+            // digest の無い古い添付なら SHA256SUMS で照合する
+            let sums_url = v["assets"]
+                .as_array()
+                .and_then(|a| a.iter().find(|a| a["name"].as_str() == Some("SHA256SUMS")))
+                .and_then(|a| a["browser_download_url"].as_str())
+                .filter(|u| u.starts_with(LIBRA_DOWNLOAD_PREFIX));
+            let Some(u) = sums_url else { return Err(first) };
+            let sums = get_text(&client, u).await?;
+            pick_libra_release(&v, Some(&sums))
+        }
+    }
+}
+
+/// Libra を置くフォルダ（エンジンのフォルダの `Libra/`）。版ごとに `Libra/<タグ>/` へ入れる。
+/// 版ごとに分けるのは、動いている libra.exe を上書きできない（Windows）のと、取り込みに失敗しても前の版で指し続けられるため
+fn libra_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(PathBuf::from(engines_dir(app.clone())?).join("Libra"))
+}
+
+/// 取り出したフォルダの中の libra.exe（zip は `libra-v0.3-windows-x64/` の 1 段の下に入っている）
+fn find_libra_exe(dir: &std::path::Path) -> Option<PathBuf> {
+    let direct = dir.join(LIBRA_EXE);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).map(|e| e.path().join(LIBRA_EXE)).find(|p| p.is_file())
+}
+
+/// Libra のリリースを取り込む。戻り値は libra.exe の場所。
+/// `previous` に前の版の libra.exe を渡すと、そちらを CUDA 版の DLL に差し替えてあれば新しい版にも写す
+#[tauri::command]
+async fn install_libra(app: AppHandle, release: LibraRelease, previous: Option<String>) -> Result<String, String> {
+    if !safe_tag(&release.tag) || !release.url.starts_with(LIBRA_DOWNLOAD_PREFIX) || !is_libra_zip(&release.name) {
+        return Err(format!("取り込めないリリース: {} {}", release.tag, release.url));
+    }
+    let root = libra_root(&app)?;
+    let dir = root.join(&release.tag);
+    let exe = match find_libra_exe(&dir) {
+        // 同じ版がもう入っていれば取り直さない（登録が消えただけのとき）
+        Some(exe) => exe,
+        None => {
+            std::fs::create_dir_all(&root).map_err(|e| format!("作れない: {} ({e})", root.display()))?;
+            let zip_path = std::env::temp_dir().join(format!("tenbin-libra-{}.zip", release.tag));
+            let label = format!("Libra {} を取りに行っています", release.tag);
+            fetch_to(&app, &release.url, &zip_path, &release.sha256, &label, (2, 85)).await?;
+            step(&app, "取り出しています…", 88);
+            // まず .part に出し、揃ってから名前を替える（途中で失敗しても半端なフォルダを Libra として残さない）
+            let part = root.join(format!("{}.part", release.tag));
+            let (z, p, d) = (zip_path.clone(), part.clone(), dir.clone());
+            let r = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+                let _ = std::fs::remove_dir_all(&p);
+                std::fs::create_dir_all(&p).map_err(|e| format!("作れない: {} ({e})", p.display()))?;
+                extract_zip_all(&z, &p)?;
+                if find_libra_exe(&p).is_none() {
+                    return Err(format!("書庫の中に {LIBRA_EXE} が無い（配布元の中身が変わった）"));
+                }
+                let _ = std::fs::remove_dir_all(&d);
+                std::fs::rename(&p, &d).map_err(|e| format!("置けない: {} ({e})", d.display()))
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            let _ = std::fs::remove_file(&zip_path);
+            if r.is_err() {
+                let _ = std::fs::remove_dir_all(&part);
+            }
+            r?;
+            find_libra_exe(&dir).ok_or_else(|| format!("{LIBRA_EXE} が見つからない: {}", dir.display()))?
+        }
+    };
+    if let Some(prev) = previous.as_deref().map(std::path::Path::new).and_then(|p| p.parent()) {
+        if let Some(new_dir) = exe.parent() {
+            if prev != new_dir {
+                step(&app, "前の版の CUDA 版の設定を引き継いでいます…", 95);
+                // 写せなくても DirectML で動く。理由は画面に返さず、案内（CUDA の欄）に任せる
+                let _ = cuda::carry_over(prev, new_dir);
+            }
+        }
+    }
+    step(&app, "できました", 100);
+    Ok(exe.to_string_lossy().into_owned())
+}
+
+/// 使わなくなった版の Libra を消す（`keep` のタグのフォルダだけ残す）。動いている版は消せないので、失敗しても黙って次の起動に回す
+#[tauri::command(async)]
+fn remove_old_libra(app: AppHandle, keep: String) -> Result<(), String> {
+    let root = libra_root(&app)?;
+    let Ok(rd) = std::fs::read_dir(&root) else { return Ok(()) };
+    for e in rd.filter_map(|e| e.ok()) {
+        if e.path().is_dir() && e.file_name().to_string_lossy() != keep {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+    Ok(())
+}
+
 /// CUDA 版への切り替えに要るものが揃っているか（エンジンの実行ファイルのフォルダと、NVIDIA の標準の場所を見る）
 #[tauri::command(async)]
 fn cuda_status(exe: String) -> cuda::Status {
@@ -691,6 +882,9 @@ pub fn run() {
             data_dir,
             install_recommended_engine,
             install_gpu_engine,
+            libra_latest,
+            install_libra,
+            remove_old_libra,
             scan_executables,
             open_path,
             cpu_info,
@@ -782,6 +976,64 @@ mod tests {
         // モデルは 29MB。中身まで書けていること（名前だけ作って中が空、を見逃さない）
         assert!(std::fs::metadata(out.join(DLSHOGI_MODEL)).unwrap().len() > 20 * 1024 * 1024);
         let _ = std::fs::remove_dir_all(&out);
+    }
+
+    fn release_json(digest: Option<&str>, url: &str) -> serde_json::Value {
+        serde_json::json!({
+            "tag_name": "v0.3",
+            "assets": [
+                { "name": "libra-v0.3-selfplay-sample.jsonl.gz", "browser_download_url": "https://github.com/kotenbu135/LibraShogi/releases/download/v0.3/libra-v0.3-selfplay-sample.jsonl.gz", "size": 1 },
+                { "name": "libra-v0.3-windows-x64.zip", "browser_download_url": url, "size": 54381396, "digest": digest },
+                { "name": "SHA256SUMS", "browser_download_url": "https://github.com/kotenbu135/LibraShogi/releases/download/v0.3/SHA256SUMS", "size": 357 }
+            ]
+        })
+    }
+
+    const ZIP_URL: &str = "https://github.com/kotenbu135/LibraShogi/releases/download/v0.3/libra-v0.3-windows-x64.zip";
+    const ZIP_SHA: &str = "bd6f41c8b09a80cb3fe6ddb5a6c629a4226489f25c8fc1f41cc9499f6a56bcf4";
+
+    /// GitHub の答えから Windows 版の zip と SHA-256 を選ぶ
+    #[test]
+    fn libra_release_is_picked_from_api() {
+        let r = pick_libra_release(&release_json(Some(&format!("sha256:{ZIP_SHA}")), ZIP_URL), None).unwrap();
+        assert_eq!(r.tag, "v0.3");
+        assert_eq!(r.name, "libra-v0.3-windows-x64.zip");
+        assert_eq!(r.url, ZIP_URL);
+        assert_eq!(r.sha256, ZIP_SHA);
+        assert_eq!(r.size, 54381396);
+    }
+
+    /// digest が無ければ SHA256SUMS から引く。どちらも無ければ取りに行かない
+    #[test]
+    fn libra_release_falls_back_to_sums() {
+        let v = release_json(None, ZIP_URL);
+        assert!(pick_libra_release(&v, None).is_err());
+        let sums = format!("2a584efd256f13b59b483b6ed9e00cac4651e83ce305ff7837daab3aeba90da2  libra-v0.3-selfplay-sample.jsonl.gz\n{ZIP_SHA}  libra-v0.3-windows-x64.zip\n");
+        assert_eq!(pick_libra_release(&v, Some(&sums)).unwrap().sha256, ZIP_SHA);
+    }
+
+    /// LibraShogi のリリース以外の場所や、フォルダの外を指すタグは受けない
+    #[test]
+    fn libra_release_rejects_foreign_places() {
+        let digest = format!("sha256:{ZIP_SHA}");
+        assert!(pick_libra_release(&release_json(Some(&digest), "https://example.com/libra-v0.3-windows-x64.zip"), None).is_err());
+        let mut v = release_json(Some(&digest), ZIP_URL);
+        v["tag_name"] = serde_json::json!("../x");
+        assert!(pick_libra_release(&v, None).is_err());
+        assert!(!safe_tag(".."));
+        assert!(safe_tag("v0.3"));
+    }
+
+    /// zip は 1 段下のフォルダに入っている。直下でも 1 段下でも libra.exe を見つける
+    #[test]
+    fn libra_exe_is_found_one_level_down() {
+        let dir = std::env::temp_dir().join(format!("tenbin-libra-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("libra-v0.3-windows-x64")).unwrap();
+        assert_eq!(find_libra_exe(&dir), None);
+        std::fs::write(dir.join("libra-v0.3-windows-x64").join(LIBRA_EXE), b"exe").unwrap();
+        assert_eq!(find_libra_exe(&dir), Some(dir.join("libra-v0.3-windows-x64").join(LIBRA_EXE)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

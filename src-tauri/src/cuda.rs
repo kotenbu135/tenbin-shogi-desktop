@@ -224,6 +224,28 @@ pub fn swap_in(zip_path: &Path, dir: &Path) -> Result<(), String> {
     result
 }
 
+/// 前の版のエンジンのフォルダが CUDA 版に差し替えてあれば、新しい版のフォルダにも同じ DLL を写す。
+/// Libra を新しいリリースへ入れ替えるたびに、380MB を取り直させたり DirectML 版の遅さへ黙って戻したりしないため。
+/// 新しい版の DirectML 版の DLL は `.dml-prev` に控えるので、「DirectML 版に戻す」で戻せる。戻り値は写したか
+pub fn carry_over(old: &Path, new: &Path) -> Result<bool, String> {
+    if !old.join(CUDA_PROVIDER_DLL).is_file() || new.join(CUDA_PROVIDER_DLL).is_file() {
+        return Ok(false);
+    }
+    for n in BACKED_UP {
+        let (cur, bak) = (new.join(n), new.join(format!("{n}{BACKUP_SUFFIX}")));
+        if cur.is_file() && !bak.exists() {
+            std::fs::rename(&cur, &bak).map_err(|e| format!("控えを取れない: {} ({e})", bak.display()))?;
+        }
+    }
+    for n in ORT_DLLS.iter().copied().chain(LICENSES.iter().map(|(_, dst)| *dst)) {
+        let src = old.join(n);
+        if src.is_file() {
+            std::fs::copy(&src, new.join(n)).map_err(|e| format!("写せない: {} ({e})", src.display()))?;
+        }
+    }
+    Ok(true)
+}
+
 /// DirectML 版に戻す（控えを元の名前に戻し、CUDA 版にしか無い DLL を消す）
 pub fn swap_out(dir: &Path) -> Result<(), String> {
     for n in BACKED_UP {
@@ -354,6 +376,33 @@ mod tests {
         assert_eq!(std::fs::read(eng.join("onnxruntime_providers_shared.dll")).unwrap(), b"dml shared");
         assert!(!eng.join(CUDA_PROVIDER_DLL).exists());
         assert!(swap_out(&eng).is_err(), "控えが無いのに戻せてはいけない");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Libra を新しい版へ入れ替えたら、CUDA 版にしてあった DLL を新しいフォルダへ写す。DirectML 版の控えも取る
+    #[test]
+    fn carry_over_keeps_cuda_across_versions() {
+        let dir = temp("carry");
+        let zip = dir.join("ort.zip");
+        fake_ort_zip(&zip);
+        let (old, new) = (dir.join("v0.3"), dir.join("v0.4"));
+        for d in [&old, &new] {
+            touch(&d.join("onnxruntime.dll"), b"dml ort");
+            touch(&d.join("onnxruntime_providers_shared.dll"), b"dml shared");
+        }
+        // 前の版が DirectML のままなら何もしない
+        assert!(!carry_over(&old, &new).unwrap());
+        assert!(!new.join("onnxruntime.dll.dml-prev").exists());
+        swap_in(&zip, &old).unwrap();
+        assert!(carry_over(&old, &new).unwrap());
+        assert_eq!(std::fs::read(new.join("onnxruntime.dll")).unwrap(), b"cuda onnxruntime.dll");
+        assert_eq!(std::fs::read(new.join(CUDA_PROVIDER_DLL)).unwrap(), b"cuda onnxruntime_providers_cuda.dll");
+        assert_eq!(std::fs::read(new.join("onnxruntime.dll.dml-prev")).unwrap(), b"dml ort");
+        assert!(new.join("onnxruntime-cuda.LICENSE.txt").is_file());
+        // 2 度目は写さない（控えを CUDA 版で上書きしない）
+        assert!(!carry_over(&old, &new).unwrap());
+        swap_out(&new).unwrap();
+        assert_eq!(std::fs::read(new.join("onnxruntime.dll")).unwrap(), b"dml ort");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

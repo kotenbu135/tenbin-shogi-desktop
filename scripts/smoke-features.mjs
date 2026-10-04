@@ -100,7 +100,7 @@ await click('button[data-act="edit"]');
 console.log('編集中:', await ev(() => !document.getElementById('editor').hidden), '|', await status());
 await page.screenshot({ path: `${OUT}/feat-editor.png` });
 await ev(() => [...document.querySelectorAll('.editor-actions button')].find((b) => b.textContent === '平手の初期配置').click());
-await ev(() => document.querySelectorAll('.palette-row')[0].querySelectorAll('.palette-piece')[7].click()); // 先手の歩
+await click('.cell[data-sq="5g"]'); // 先手の歩を持って
 await click('.cell[data-sq="5e"]');
 console.log('５五に置いた:', await ev(() => document.querySelector('.cell[data-sq="5e"] .piece')?.dataset.code));
 await ev(() => [...document.querySelectorAll('.editor-actions button')].find((b) => b.textContent.includes('この局面から')).click());
